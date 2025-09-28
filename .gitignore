@@ -27,6 +27,15 @@ go.work.sum
 # env file
 .env
 
+# Configuration files with sensitive data
+config.yaml
+config.yml
+config.json
+
 # Editor/IDE
 # .idea/
 # .vscode/
+
+bin/
+vmware-vix-disklib-distrib/
+VMware-vix-disklib-8.0.3-*.tar.gz

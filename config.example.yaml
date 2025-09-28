@@ -1,0 +1,56 @@
+# VM Deep Inspection Demo Configuration
+# Copy this file to config.yaml and modify values as needed
+
+# VMware vSphere connection configuration
+vmware:
+  # vCenter Server URL (required)
+  vcenter_url: "https://vcenter.example.com/sdk"
+
+  # vSphere credentials (required)
+  username: "service-account"
+  password: "test-password"
+
+  # Skip TLS certificate verification (not recommended for production)
+  insecure_skip_verify: false
+
+  # Connection timeouts
+  connection_timeout: "30s"
+  request_timeout: "60s"
+
+  # Retry settings
+  retry_attempts: 3
+  retry_delay: "5s"
+
+# HTTP server configuration
+server:
+  # Server address and port
+  host: "0.0.0.0"
+  port: 8080
+
+  # HTTP timeouts
+  read_timeout: "10s"
+  write_timeout: "10s"
+  idle_timeout: "60s"
+
+  # Enable CORS (Cross-Origin Resource Sharing)
+  enable_cors: true
+
+  # TLS configuration (optional)
+  tls:
+    enabled: false
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+
+# Logging configuration
+logging:
+  # Log level: debug, info, warn, error
+  level: "info"
+
+  # Log format: json, text
+  format: "json"
+
+  # Log output: stdout, stderr, file
+  output: "stdout"
+
+  # File logging path (when output is "file")
+  file_path: "/var/log/vm-deep-inspection.log"

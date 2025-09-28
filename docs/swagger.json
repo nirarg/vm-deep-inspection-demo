@@ -1,0 +1,843 @@
+{
+    "schemes": [
+        "http",
+        "https"
+    ],
+    "swagger": "2.0",
+    "info": {
+        "description": "A Go service for investigating \"Deep inspection\" of VMs in VMware vSphere",
+        "title": "VM Deep Inspection Demo API",
+        "contact": {},
+        "version": "0.1"
+    },
+    "host": "localhost:8080",
+    "basePath": "/",
+    "paths": {
+        "/api/v1/vms": {
+            "get": {
+                "description": "Get a list of all virtual machines",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "List all virtual machines",
+                "responses": {
+                    "200": {
+                        "description": "List of virtual machines",
+                        "schema": {
+                            "$ref": "#/definitions/types.VMListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "vSphere connection unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/clone": {
+            "post": {
+                "description": "Create a linked clone from a VM snapshot for inspection",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Create a clone from VM snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01\"",
+                        "description": "VM name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Clone request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.CloneRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Clone created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.CloneResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VM or snapshot not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/delete-clone": {
+            "delete": {
+                "description": "Delete a cloned VM created for inspection",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Delete a cloned VM",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01-clone-123\"",
+                        "description": "Clone VM name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Clone deleted successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Clone not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/inspect-clone": {
+            "post": {
+                "description": "Run virt-inspector on a cloned VM",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Inspect a cloned VM",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01-clone-123\"",
+                        "description": "Clone VM name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Inspection completed successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.VMInspectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Clone not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/inspect-snapshot": {
+            "post": {
+                "description": "Run virt-inspector with VDDK on a VM snapshot without creating a clone",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Inspect a VM snapshot directly",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01\"",
+                        "description": "Original VM name",
+                        "name": "vm",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"inspection-snapshot\"",
+                        "description": "Snapshot name",
+                        "name": "snapshot",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Inspection completed successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.VMInspectionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VM or snapshot not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/snapshot": {
+            "post": {
+                "description": "Create a snapshot for a specific virtual machine",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Create a VM snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01\"",
+                        "description": "VM name",
+                        "name": "name",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "description": "Snapshot creation request",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/types.SnapshotCreateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Snapshot created successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.SnapshotCreateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VM not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "vSphere connection unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/vms/{name}": {
+            "get": {
+                "description": "Get detailed information about a specific virtual machine by name",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Get virtual machine details",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01\"",
+                        "description": "VM name",
+                        "name": "name",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Virtual machine details",
+                        "schema": {
+                            "$ref": "#/definitions/types.VMDetailsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VM not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "vSphere connection unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "types.Application": {
+            "type": "object",
+            "properties": {
+                "arch": {
+                    "type": "string",
+                    "example": "amd64"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "nginx is a web server with a strong focus on high concurrency"
+                },
+                "epoch": {
+                    "type": "integer"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "nginx"
+                },
+                "release": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string",
+                    "example": "High performance web server"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://nginx.org"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.18.0"
+                }
+            }
+        },
+        "types.CloneRequest": {
+            "type": "object",
+            "required": [
+                "snapshot_name"
+            ],
+            "properties": {
+                "clone_name": {
+                    "type": "string",
+                    "example": "my-clone"
+                },
+                "snapshot_name": {
+                    "type": "string",
+                    "example": "backup-snapshot"
+                }
+            }
+        },
+        "types.CloneResponse": {
+            "type": "object",
+            "properties": {
+                "clone_name": {
+                    "type": "string",
+                    "example": "vm-clone-123"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Clone created successfully"
+                },
+                "snapshot_name": {
+                    "type": "string",
+                    "example": "backup-snapshot"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "completed"
+                },
+                "vm_name": {
+                    "type": "string",
+                    "example": "web-server-01"
+                }
+            }
+        },
+        "types.Drive": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "/dev/sda"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "disk"
+                }
+            }
+        },
+        "types.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "VALIDATION_ERROR"
+                },
+                "details": {
+                    "type": "string",
+                    "example": "VM ID is required"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "Invalid request"
+                }
+            }
+        },
+        "types.Filesystem": {
+            "type": "object",
+            "properties": {
+                "device": {
+                    "type": "string",
+                    "example": "/dev/sda1"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "ext4"
+                },
+                "used": {
+                    "type": "integer"
+                },
+                "uuid": {
+                    "type": "string",
+                    "example": "ac818163-71e7-4b23-a1b7-e94196b9dada"
+                }
+            }
+        },
+        "types.InspectionData": {
+            "type": "object",
+            "properties": {
+                "applications": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.Application"
+                    }
+                },
+                "drives": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.Drive"
+                    }
+                },
+                "filesystems": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.Filesystem"
+                    }
+                },
+                "mountpoints": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.Mountpoint"
+                    }
+                },
+                "operating_system": {
+                    "$ref": "#/definitions/types.OSInfo"
+                }
+            }
+        },
+        "types.Mountpoint": {
+            "type": "object",
+            "properties": {
+                "device": {
+                    "type": "string",
+                    "example": "/dev/sda1"
+                },
+                "mount_point": {
+                    "type": "string",
+                    "example": "/boot"
+                }
+            }
+        },
+        "types.OSInfo": {
+            "type": "object",
+            "properties": {
+                "architecture": {
+                    "type": "string",
+                    "example": "x86_64"
+                },
+                "distro": {
+                    "type": "string",
+                    "example": "ubuntu"
+                },
+                "hostname": {
+                    "type": "string",
+                    "example": "web-server-01"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "linux"
+                },
+                "osinfo": {
+                    "type": "string",
+                    "example": "centos9"
+                },
+                "package_format": {
+                    "type": "string",
+                    "example": "rpm"
+                },
+                "package_management": {
+                    "type": "string",
+                    "example": "dnf"
+                },
+                "product": {
+                    "type": "string",
+                    "example": "Ubuntu 22.04 LTS"
+                },
+                "root": {
+                    "type": "string",
+                    "example": "/dev/sda1"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "22.04"
+                }
+            }
+        },
+        "types.SnapshotCreateRequest": {
+            "type": "object",
+            "required": [
+                "name"
+            ],
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "example": "Backup before upgrade"
+                },
+                "memory": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "name": {
+                    "type": "string",
+                    "example": "backup-snapshot"
+                },
+                "quiesce": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "types.SnapshotCreateResponse": {
+            "type": "object",
+            "properties": {
+                "created_time": {
+                    "type": "string",
+                    "example": "2024-01-15T14:30:00Z"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Snapshot created successfully"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "backup-snapshot"
+                },
+                "snapshot_id": {
+                    "type": "string",
+                    "example": "snapshot-123"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "completed"
+                },
+                "vm_id": {
+                    "type": "string",
+                    "example": "vm-456"
+                },
+                "vm_name": {
+                    "type": "string",
+                    "example": "web-server-01"
+                }
+            }
+        },
+        "types.VM": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "example": "web-server-01"
+                },
+                "power_state": {
+                    "type": "string",
+                    "example": "poweredOn"
+                },
+                "uuid": {
+                    "type": "string",
+                    "example": "502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"
+                }
+            }
+        },
+        "types.VMDetailsResponse": {
+            "type": "object",
+            "properties": {
+                "networks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.VMNetworkInfo"
+                    }
+                },
+                "recent_events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.VMEvent"
+                    }
+                },
+                "storage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.VMStorageInfo"
+                    }
+                },
+                "vm": {
+                    "$ref": "#/definitions/types.VM"
+                }
+            }
+        },
+        "types.VMEvent": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "example": "Virtual machine powered on"
+                },
+                "event_type": {
+                    "type": "string",
+                    "example": "VmPoweredOnEvent"
+                },
+                "host": {
+                    "type": "string",
+                    "example": "esxi-host-01.example.com"
+                },
+                "timestamp": {
+                    "type": "string",
+                    "example": "2024-01-15T14:30:00Z"
+                },
+                "user": {
+                    "type": "string",
+                    "example": "administrator@vsphere.local"
+                }
+            }
+        },
+        "types.VMInspectionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/types.InspectionData"
+                },
+                "message": {
+                    "type": "string",
+                    "example": "Inspection completed successfully"
+                },
+                "snapshot_name": {
+                    "type": "string",
+                    "example": "backup-snapshot"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "completed"
+                },
+                "vm_name": {
+                    "type": "string",
+                    "example": "web-server-01"
+                }
+            }
+        },
+        "types.VMListResponse": {
+            "type": "object",
+            "properties": {
+                "datacenter": {
+                    "type": "string",
+                    "example": "Datacenter1"
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 150
+                },
+                "vms": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.VM"
+                    }
+                }
+            }
+        },
+        "types.VMNetworkInfo": {
+            "type": "object",
+            "properties": {
+                "connected": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "ip_addresses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "192.168.1.100"
+                    ]
+                },
+                "mac_address": {
+                    "type": "string",
+                    "example": "00:50:56:9a:12:34"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "VM Network"
+                },
+                "network_type": {
+                    "type": "string",
+                    "example": "portgroup"
+                }
+            }
+        },
+        "types.VMStorageInfo": {
+            "type": "object",
+            "properties": {
+                "datastore": {
+                    "type": "string",
+                    "example": "datastore1"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "[datastore1] web-server-01/web-server-01.vmdk"
+                },
+                "size_gb": {
+                    "type": "integer",
+                    "example": 50
+                },
+                "type": {
+                    "type": "string",
+                    "example": "thin"
+                },
+                "used_gb": {
+                    "type": "integer",
+                    "example": 25
+                }
+            }
+        }
+    }
+}

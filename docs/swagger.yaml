@@ -1,0 +1,580 @@
+basePath: /
+definitions:
+  types.Application:
+    properties:
+      arch:
+        example: amd64
+        type: string
+      description:
+        example: nginx is a web server with a strong focus on high concurrency
+        type: string
+      epoch:
+        type: integer
+      name:
+        example: nginx
+        type: string
+      release:
+        type: string
+      summary:
+        example: High performance web server
+        type: string
+      url:
+        example: https://nginx.org
+        type: string
+      version:
+        example: 1.18.0
+        type: string
+    type: object
+  types.CloneRequest:
+    properties:
+      clone_name:
+        example: my-clone
+        type: string
+      snapshot_name:
+        example: backup-snapshot
+        type: string
+    required:
+    - snapshot_name
+    type: object
+  types.CloneResponse:
+    properties:
+      clone_name:
+        example: vm-clone-123
+        type: string
+      message:
+        example: Clone created successfully
+        type: string
+      snapshot_name:
+        example: backup-snapshot
+        type: string
+      status:
+        example: completed
+        type: string
+      vm_name:
+        example: web-server-01
+        type: string
+    type: object
+  types.Drive:
+    properties:
+      name:
+        example: /dev/sda
+        type: string
+      size:
+        type: integer
+      type:
+        example: disk
+        type: string
+    type: object
+  types.ErrorResponse:
+    properties:
+      code:
+        example: VALIDATION_ERROR
+        type: string
+      details:
+        example: VM ID is required
+        type: string
+      error:
+        example: Invalid request
+        type: string
+    type: object
+  types.Filesystem:
+    properties:
+      device:
+        example: /dev/sda1
+        type: string
+      size:
+        type: integer
+      type:
+        example: ext4
+        type: string
+      used:
+        type: integer
+      uuid:
+        example: ac818163-71e7-4b23-a1b7-e94196b9dada
+        type: string
+    type: object
+  types.InspectionData:
+    properties:
+      applications:
+        items:
+          $ref: '#/definitions/types.Application'
+        type: array
+      drives:
+        items:
+          $ref: '#/definitions/types.Drive'
+        type: array
+      filesystems:
+        items:
+          $ref: '#/definitions/types.Filesystem'
+        type: array
+      mountpoints:
+        items:
+          $ref: '#/definitions/types.Mountpoint'
+        type: array
+      operating_system:
+        $ref: '#/definitions/types.OSInfo'
+    type: object
+  types.Mountpoint:
+    properties:
+      device:
+        example: /dev/sda1
+        type: string
+      mount_point:
+        example: /boot
+        type: string
+    type: object
+  types.OSInfo:
+    properties:
+      architecture:
+        example: x86_64
+        type: string
+      distro:
+        example: ubuntu
+        type: string
+      hostname:
+        example: web-server-01
+        type: string
+      name:
+        example: linux
+        type: string
+      osinfo:
+        example: centos9
+        type: string
+      package_format:
+        example: rpm
+        type: string
+      package_management:
+        example: dnf
+        type: string
+      product:
+        example: Ubuntu 22.04 LTS
+        type: string
+      root:
+        example: /dev/sda1
+        type: string
+      version:
+        example: "22.04"
+        type: string
+    type: object
+  types.SnapshotCreateRequest:
+    properties:
+      description:
+        example: Backup before upgrade
+        type: string
+      memory:
+        example: false
+        type: boolean
+      name:
+        example: backup-snapshot
+        type: string
+      quiesce:
+        example: true
+        type: boolean
+    required:
+    - name
+    type: object
+  types.SnapshotCreateResponse:
+    properties:
+      created_time:
+        example: "2024-01-15T14:30:00Z"
+        type: string
+      message:
+        example: Snapshot created successfully
+        type: string
+      name:
+        example: backup-snapshot
+        type: string
+      snapshot_id:
+        example: snapshot-123
+        type: string
+      status:
+        example: completed
+        type: string
+      vm_id:
+        example: vm-456
+        type: string
+      vm_name:
+        example: web-server-01
+        type: string
+    type: object
+  types.VM:
+    properties:
+      name:
+        example: web-server-01
+        type: string
+      power_state:
+        example: poweredOn
+        type: string
+      uuid:
+        example: 502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g
+        type: string
+    type: object
+  types.VMDetailsResponse:
+    properties:
+      networks:
+        items:
+          $ref: '#/definitions/types.VMNetworkInfo'
+        type: array
+      recent_events:
+        items:
+          $ref: '#/definitions/types.VMEvent'
+        type: array
+      storage:
+        items:
+          $ref: '#/definitions/types.VMStorageInfo'
+        type: array
+      vm:
+        $ref: '#/definitions/types.VM'
+    type: object
+  types.VMEvent:
+    properties:
+      description:
+        example: Virtual machine powered on
+        type: string
+      event_type:
+        example: VmPoweredOnEvent
+        type: string
+      host:
+        example: esxi-host-01.example.com
+        type: string
+      timestamp:
+        example: "2024-01-15T14:30:00Z"
+        type: string
+      user:
+        example: administrator@vsphere.local
+        type: string
+    type: object
+  types.VMInspectionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/types.InspectionData'
+      message:
+        example: Inspection completed successfully
+        type: string
+      snapshot_name:
+        example: backup-snapshot
+        type: string
+      status:
+        example: completed
+        type: string
+      vm_name:
+        example: web-server-01
+        type: string
+    type: object
+  types.VMListResponse:
+    properties:
+      datacenter:
+        example: Datacenter1
+        type: string
+      total:
+        example: 150
+        type: integer
+      vms:
+        items:
+          $ref: '#/definitions/types.VM'
+        type: array
+    type: object
+  types.VMNetworkInfo:
+    properties:
+      connected:
+        example: true
+        type: boolean
+      ip_addresses:
+        example:
+        - 192.168.1.100
+        items:
+          type: string
+        type: array
+      mac_address:
+        example: 00:50:56:9a:12:34
+        type: string
+      name:
+        example: VM Network
+        type: string
+      network_type:
+        example: portgroup
+        type: string
+    type: object
+  types.VMStorageInfo:
+    properties:
+      datastore:
+        example: datastore1
+        type: string
+      path:
+        example: '[datastore1] web-server-01/web-server-01.vmdk'
+        type: string
+      size_gb:
+        example: 50
+        type: integer
+      type:
+        example: thin
+        type: string
+      used_gb:
+        example: 25
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact: {}
+  description: A Go service for investigating "Deep inspection" of VMs in VMware vSphere
+  title: VM Deep Inspection Demo API
+  version: "0.1"
+paths:
+  /api/v1/vms:
+    get:
+      consumes:
+      - application/json
+      description: Get a list of all virtual machines
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of virtual machines
+          schema:
+            $ref: '#/definitions/types.VMListResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "503":
+          description: vSphere connection unavailable
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: List all virtual machines
+      tags:
+      - vms
+  /api/v1/vms/{name}:
+    get:
+      consumes:
+      - application/json
+      description: Get detailed information about a specific virtual machine by name
+      parameters:
+      - description: VM name
+        example: '"web-server-01"'
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual machine details
+          schema:
+            $ref: '#/definitions/types.VMDetailsResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: VM not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "503":
+          description: vSphere connection unavailable
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get virtual machine details
+      tags:
+      - vms
+  /api/v1/vms/clone:
+    post:
+      consumes:
+      - application/json
+      description: Create a linked clone from a VM snapshot for inspection
+      parameters:
+      - description: VM name
+        example: '"web-server-01"'
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: Clone request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.CloneRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Clone created successfully
+          schema:
+            $ref: '#/definitions/types.CloneResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: VM or snapshot not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Create a clone from VM snapshot
+      tags:
+      - vms
+  /api/v1/vms/delete-clone:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a cloned VM created for inspection
+      parameters:
+      - description: Clone VM name
+        example: '"web-server-01-clone-123"'
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Clone deleted successfully
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Clone not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Delete a cloned VM
+      tags:
+      - vms
+  /api/v1/vms/inspect-clone:
+    post:
+      consumes:
+      - application/json
+      description: Run virt-inspector on a cloned VM
+      parameters:
+      - description: Clone VM name
+        example: '"web-server-01-clone-123"'
+        in: query
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Inspection completed successfully
+          schema:
+            $ref: '#/definitions/types.VMInspectionResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Clone not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Inspect a cloned VM
+      tags:
+      - vms
+  /api/v1/vms/inspect-snapshot:
+    post:
+      consumes:
+      - application/json
+      description: Run virt-inspector with VDDK on a VM snapshot without creating
+        a clone
+      parameters:
+      - description: Original VM name
+        example: '"web-server-01"'
+        in: query
+        name: vm
+        required: true
+        type: string
+      - description: Snapshot name
+        example: '"inspection-snapshot"'
+        in: query
+        name: snapshot
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Inspection completed successfully
+          schema:
+            $ref: '#/definitions/types.VMInspectionResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: VM or snapshot not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Inspect a VM snapshot directly
+      tags:
+      - vms
+  /api/v1/vms/snapshot:
+    post:
+      consumes:
+      - application/json
+      description: Create a snapshot for a specific virtual machine
+      parameters:
+      - description: VM name
+        example: '"web-server-01"'
+        in: query
+        name: name
+        required: true
+        type: string
+      - description: Snapshot creation request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.SnapshotCreateRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Snapshot created successfully
+          schema:
+            $ref: '#/definitions/types.SnapshotCreateResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: VM not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "503":
+          description: vSphere connection unavailable
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Create a VM snapshot
+      tags:
+      - vms
+schemes:
+- http
+- https
+swagger: "2.0"
