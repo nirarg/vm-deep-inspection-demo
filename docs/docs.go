@@ -695,6 +695,15 @@ const docTemplate = `{
         "types.VMDetailsResponse": {
             "type": "object",
             "properties": {
+                "guest_info": {
+                    "$ref": "#/definitions/types.VMGuestInfo"
+                },
+                "hardware": {
+                    "$ref": "#/definitions/types.VMHardwareInfo"
+                },
+                "metadata": {
+                    "$ref": "#/definitions/types.VMMetadata"
+                },
                 "networks": {
                     "type": "array",
                     "items": {
@@ -712,6 +721,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/types.VMStorageInfo"
                     }
+                },
+                "tools": {
+                    "$ref": "#/definitions/types.VMToolsInfo"
                 },
                 "vm": {
                     "$ref": "#/definitions/types.VM"
@@ -740,6 +752,58 @@ const docTemplate = `{
                 "user": {
                     "type": "string",
                     "example": "administrator@vsphere.local"
+                }
+            }
+        },
+        "types.VMGuestInfo": {
+            "type": "object",
+            "properties": {
+                "guest_id": {
+                    "type": "string",
+                    "example": "rhel9_64Guest"
+                },
+                "hostname": {
+                    "type": "string",
+                    "example": "web-server-01"
+                },
+                "ip_addresses": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "192.168.1.100",
+                        "10.0.0.5"
+                    ]
+                }
+            }
+        },
+        "types.VMHardwareInfo": {
+            "type": "object",
+            "properties": {
+                "firmware_type": {
+                    "type": "string",
+                    "example": "bios"
+                },
+                "guest_full_name": {
+                    "type": "string",
+                    "example": "Ubuntu Linux (64-bit)"
+                },
+                "memory_mb": {
+                    "type": "integer",
+                    "example": 4096
+                },
+                "num_cores_per_socket": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "num_cpu": {
+                    "type": "integer",
+                    "example": 2
+                },
+                "version": {
+                    "type": "string",
+                    "example": "vmx-19"
                 }
             }
         },
@@ -783,6 +847,23 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/types.VM"
                     }
+                }
+            }
+        },
+        "types.VMMetadata": {
+            "type": "object",
+            "properties": {
+                "annotation": {
+                    "type": "string",
+                    "example": "Production web server"
+                },
+                "bios_uuid": {
+                    "type": "string",
+                    "example": "502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"
+                },
+                "instance_uuid": {
+                    "type": "string",
+                    "example": "502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"
                 }
             }
         },
@@ -838,6 +919,27 @@ const docTemplate = `{
                 "used_gb": {
                     "type": "integer",
                     "example": 25
+                }
+            }
+        },
+        "types.VMToolsInfo": {
+            "type": "object",
+            "properties": {
+                "running_status": {
+                    "type": "string",
+                    "example": "guestToolsRunning"
+                },
+                "status": {
+                    "type": "string",
+                    "example": "toolsOk"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "12.1.5"
+                },
+                "version_status": {
+                    "type": "string",
+                    "example": "guestToolsCurrent"
                 }
             }
         }

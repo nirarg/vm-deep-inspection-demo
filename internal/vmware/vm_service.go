@@ -31,17 +31,45 @@ type VMFilter struct {
 	Offset      int    `json:"offset,omitempty"`
 }
 
-// VMInfo represents detailed information about a virtual machine
+// VMInfo represents basic information about a virtual machine
 type VMInfo struct {
 	UUID       string `json:"uuid"`
 	Name       string `json:"name"`
 	PowerState string `json:"power_state"`
 }
 
+// VMDetailedInfo represents comprehensive information about a virtual machine
+type VMDetailedInfo struct {
+	UUID              string   `json:"uuid"`
+	Name              string   `json:"name"`
+	PowerState        string   `json:"power_state"`
+	GuestFullName     string   `json:"guest_full_name"`
+	GuestID           string   `json:"guest_id"`
+	NumCPU            int32    `json:"num_cpu"`
+	NumCoresPerSocket int32    `json:"num_cores_per_socket"`
+	MemoryMB          int32    `json:"memory_mb"`
+	ToolsStatus       string   `json:"tools_status"`
+	ToolsVersion      string   `json:"tools_version"`
+	ToolsRunningStatus string  `json:"tools_running_status"`
+	IPAddresses       []string `json:"ip_addresses"`
+	Hostname          string   `json:"hostname"`
+	Version           string   `json:"version"`
+	InstanceUUID      string   `json:"instance_uuid"`
+	BiosUUID          string   `json:"bios_uuid"`
+	Annotation        string   `json:"annotation"`
+	FirmwareType      string   `json:"firmware_type"`
+}
+
 // VMResult represents a single VM result
 type VMResult struct {
 	Datacenter string `json:"datacenter"`
 	VM         VMInfo `json:"vm"`
+}
+
+// VMDetailedResult represents a detailed VM result
+type VMDetailedResult struct {
+	Datacenter string         `json:"datacenter"`
+	VM         VMDetailedInfo `json:"vm"`
 }
 
 // VMListResult represents the result of VM listing
@@ -95,8 +123,8 @@ func (s *VMService) findVMByName(ctx context.Context, name string) (*object.Virt
 	return vm, datacenter, nil
 }
 
-// GetVMByName retrieves a single VM by its name
-func (s *VMService) GetVMByName(ctx context.Context, name string) (*VMResult, error) {
+// GetVMByName retrieves a single VM by its name with full details
+func (s *VMService) GetVMByName(ctx context.Context, name string) (*VMDetailedResult, error) {
 	s.logger.WithField("name", name).Info("Getting VM by name")
 
 	// Find VM by name
@@ -111,25 +139,40 @@ func (s *VMService) GetVMByName(ctx context.Context, name string) (*VMResult, er
 		return nil, fmt.Errorf("failed to get vSphere client: %w", err)
 	}
 
-	// Retrieve VM properties
+	// Retrieve VM properties with comprehensive details
 	var vmProp mo.VirtualMachine
 	pc := property.DefaultCollector(client.Client)
 	err = pc.RetrieveOne(ctx, vm.Reference(), []string{
 		"name",
 		"config.uuid",
+		"config.instanceUuid",
+		"config.guestFullName",
+		"config.guestId",
+		"config.hardware.numCPU",
+		"config.hardware.numCoresPerSocket",
+		"config.hardware.memoryMB",
+		"config.version",
+		"config.firmware",
+		"config.annotation",
 		"runtime.powerState",
+		"guest.toolsStatus",
+		"guest.toolsVersion",
+		"guest.toolsRunningStatus",
+		"guest.ipAddress",
+		"guest.hostName",
+		"guest.net",
 	}, &vmProp)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve VM properties: %w", err)
 	}
 
-	// Convert to VMInfo
-	vmInfo := s.convertToVMInfo(vmProp)
+	// Convert to VMDetailedInfo
+	vmInfo := s.convertToVMDetailedInfo(vmProp)
 
 	s.logger.Info("VM retrieval completed")
 
-	return &VMResult{
+	return &VMDetailedResult{
 		Datacenter: datacenter.Name(),
 		VM:         *vmInfo,
 	}, nil
@@ -295,6 +338,74 @@ func (s *VMService) convertToVMInfo(vm mo.VirtualMachine) *VMInfo {
 		Name:       vm.Name,
 		PowerState: string(vm.Runtime.PowerState),
 	}
+}
+
+// convertToVMDetailedInfo converts a vSphere VM managed object to VMDetailedInfo
+func (s *VMService) convertToVMDetailedInfo(vm mo.VirtualMachine) *VMDetailedInfo {
+	info := &VMDetailedInfo{
+		UUID:       vm.Config.Uuid,
+		Name:       vm.Name,
+		PowerState: string(vm.Runtime.PowerState),
+	}
+
+	// Config properties
+	if vm.Config != nil {
+		info.InstanceUUID = vm.Config.InstanceUuid
+		info.GuestFullName = vm.Config.GuestFullName
+		info.GuestID = vm.Config.GuestId
+		info.Version = vm.Config.Version
+		info.Annotation = vm.Config.Annotation
+		info.FirmwareType = vm.Config.Firmware
+
+		// Hardware properties
+		if vm.Config.Hardware.NumCPU > 0 {
+			info.NumCPU = vm.Config.Hardware.NumCPU
+		}
+		if vm.Config.Hardware.NumCoresPerSocket > 0 {
+			info.NumCoresPerSocket = vm.Config.Hardware.NumCoresPerSocket
+		}
+		if vm.Config.Hardware.MemoryMB > 0 {
+			info.MemoryMB = vm.Config.Hardware.MemoryMB
+		}
+	}
+
+	// Guest properties
+	if vm.Guest != nil {
+		info.ToolsStatus = string(vm.Guest.ToolsStatus)
+		info.ToolsVersion = vm.Guest.ToolsVersion
+		info.ToolsRunningStatus = vm.Guest.ToolsRunningStatus
+		info.Hostname = vm.Guest.HostName
+
+		// Collect all IP addresses from guest NICs
+		var ipAddresses []string
+		if vm.Guest.IpAddress != "" {
+			ipAddresses = append(ipAddresses, vm.Guest.IpAddress)
+		}
+		for _, nic := range vm.Guest.Net {
+			if nic.IpConfig != nil {
+				for _, ipConfig := range nic.IpConfig.IpAddress {
+					ip := ipConfig.IpAddress
+					// Skip if already in list
+					found := false
+					for _, existing := range ipAddresses {
+						if existing == ip {
+							found = true
+							break
+						}
+					}
+					if !found && ip != "" {
+						ipAddresses = append(ipAddresses, ip)
+					}
+				}
+			}
+		}
+		info.IPAddresses = ipAddresses
+	}
+
+	// Get BIOS UUID (same as UUID in most cases)
+	info.BiosUUID = vm.Config.Uuid
+
+	return info
 }
 
 // FindSnapshotByName finds a snapshot by name on a VM

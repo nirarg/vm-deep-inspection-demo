@@ -63,12 +63,30 @@ type VMListResponse struct {
 	Total      int    `json:"total" example:"150"`
 }
 
+// VMGuestInfo represents guest OS information
+type VMGuestInfo struct {
+	Hostname    string   `json:"hostname,omitempty" example:"web-server-01"`
+	IPAddresses []string `json:"ip_addresses,omitempty" example:"192.168.1.100,10.0.0.5"`
+	GuestID     string   `json:"guest_id,omitempty" example:"rhel9_64Guest"`
+}
+
+// VMMetadata represents VM metadata
+type VMMetadata struct {
+	InstanceUUID string `json:"instance_uuid,omitempty" example:"502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"`
+	BiosUUID     string `json:"bios_uuid,omitempty" example:"502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"`
+	Annotation   string `json:"annotation,omitempty" example:"Production web server"`
+}
+
 // VMDetailsResponse represents detailed information about a single VM
 type VMDetailsResponse struct {
-	VM       VM                `json:"vm"`
-	Networks []VMNetworkInfo   `json:"networks,omitempty"`
-	Storage  []VMStorageInfo   `json:"storage,omitempty"`
-	Events   []VMEvent         `json:"recent_events,omitempty"`
+	VM        VM              `json:"vm"`
+	Hardware  VMHardwareInfo  `json:"hardware"`
+	Tools     VMToolsInfo     `json:"tools"`
+	GuestInfo VMGuestInfo     `json:"guest_info"`
+	Metadata  VMMetadata      `json:"metadata"`
+	Networks  []VMNetworkInfo `json:"networks,omitempty"`
+	Storage   []VMStorageInfo `json:"storage,omitempty"`
+	Events    []VMEvent       `json:"recent_events,omitempty"`
 }
 
 // VMEvent represents a VM-related event

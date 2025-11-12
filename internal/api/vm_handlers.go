@@ -144,10 +144,39 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 		return
 	}
 
-	vm := h.convertVMInfoToVM(result.VM)
+	// Convert detailed VM info to API response
+	vm := types.VM{
+		UUID:       result.VM.UUID,
+		Name:       result.VM.Name,
+		PowerState: result.VM.PowerState,
+	}
 
+	// Build detailed response with all available information
 	response := types.VMDetailsResponse{
-		VM:       vm,
+		VM: vm,
+		Hardware: types.VMHardwareInfo{
+			NumCPU:            result.VM.NumCPU,
+			NumCoresPerSocket: result.VM.NumCoresPerSocket,
+			MemoryMB:          result.VM.MemoryMB,
+			GuestFullName:     result.VM.GuestFullName,
+			Version:           result.VM.Version,
+			FirmwareType:      result.VM.FirmwareType,
+		},
+		Tools: types.VMToolsInfo{
+			Status:        result.VM.ToolsStatus,
+			Version:       result.VM.ToolsVersion,
+			RunningStatus: result.VM.ToolsRunningStatus,
+		},
+		GuestInfo: types.VMGuestInfo{
+			Hostname:    result.VM.Hostname,
+			IPAddresses: result.VM.IPAddresses,
+			GuestID:     result.VM.GuestID,
+		},
+		Metadata: types.VMMetadata{
+			InstanceUUID: result.VM.InstanceUUID,
+			BiosUUID:     result.VM.BiosUUID,
+			Annotation:   result.VM.Annotation,
+		},
 		Networks: []types.VMNetworkInfo{},
 		Storage:  []types.VMStorageInfo{},
 		Events:   []types.VMEvent{},

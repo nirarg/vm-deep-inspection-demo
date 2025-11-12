@@ -211,6 +211,12 @@ definitions:
     type: object
   types.VMDetailsResponse:
     properties:
+      guest_info:
+        $ref: '#/definitions/types.VMGuestInfo'
+      hardware:
+        $ref: '#/definitions/types.VMHardwareInfo'
+      metadata:
+        $ref: '#/definitions/types.VMMetadata'
       networks:
         items:
           $ref: '#/definitions/types.VMNetworkInfo'
@@ -223,6 +229,8 @@ definitions:
         items:
           $ref: '#/definitions/types.VMStorageInfo'
         type: array
+      tools:
+        $ref: '#/definitions/types.VMToolsInfo'
       vm:
         $ref: '#/definitions/types.VM'
     type: object
@@ -242,6 +250,43 @@ definitions:
         type: string
       user:
         example: administrator@vsphere.local
+        type: string
+    type: object
+  types.VMGuestInfo:
+    properties:
+      guest_id:
+        example: rhel9_64Guest
+        type: string
+      hostname:
+        example: web-server-01
+        type: string
+      ip_addresses:
+        example:
+        - 192.168.1.100
+        - 10.0.0.5
+        items:
+          type: string
+        type: array
+    type: object
+  types.VMHardwareInfo:
+    properties:
+      firmware_type:
+        example: bios
+        type: string
+      guest_full_name:
+        example: Ubuntu Linux (64-bit)
+        type: string
+      memory_mb:
+        example: 4096
+        type: integer
+      num_cores_per_socket:
+        example: 1
+        type: integer
+      num_cpu:
+        example: 2
+        type: integer
+      version:
+        example: vmx-19
         type: string
     type: object
   types.VMInspectionResponse:
@@ -273,6 +318,18 @@ definitions:
         items:
           $ref: '#/definitions/types.VM'
         type: array
+    type: object
+  types.VMMetadata:
+    properties:
+      annotation:
+        example: Production web server
+        type: string
+      bios_uuid:
+        example: 502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g
+        type: string
+      instance_uuid:
+        example: 502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g
+        type: string
     type: object
   types.VMNetworkInfo:
     properties:
@@ -312,6 +369,21 @@ definitions:
       used_gb:
         example: 25
         type: integer
+    type: object
+  types.VMToolsInfo:
+    properties:
+      running_status:
+        example: guestToolsRunning
+        type: string
+      status:
+        example: toolsOk
+        type: string
+      version:
+        example: 12.1.5
+        type: string
+      version_status:
+        example: guestToolsCurrent
+        type: string
     type: object
 host: localhost:8080
 info:
