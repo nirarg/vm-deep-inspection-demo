@@ -29,19 +29,26 @@ func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, logger *
 
 // ListVMs godoc
 // @Summary List all virtual machines
-// @Description Get a list of all virtual machines
+// @Description Get a list of all virtual machines with optional name filtering
 // @Tags vms
 // @Accept json
 // @Produce json
+// @Param name_contains query string false "Filter VMs where name contains this string" example("web")
 // @Success 200 {object} types.VMListResponse "List of virtual machines"
 // @Failure 500 {object} types.ErrorResponse "Internal server error"
 // @Failure 503 {object} types.ErrorResponse "vSphere connection unavailable"
 // @Router /api/v1/vms [get]
 func (h *VMHandler) ListVMs(c *gin.Context) {
-	h.logger.Info("Listing all VMs")
+	nameContains := c.Query("name_contains")
 
-	// Call service with empty filter to list all VMs
-	result, err := h.vmService.ListVMs(c.Request.Context(), vmware.VMFilter{})
+	h.logger.WithField("name_contains", nameContains).Info("Listing VMs")
+
+	// Build filter from query parameters
+	filter := vmware.VMFilter{
+		Name: nameContains,
+	}
+
+	result, err := h.vmService.ListVMs(c.Request.Context(), filter)
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to list VMs")
 
@@ -151,6 +158,46 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 		PowerState: result.VM.PowerState,
 	}
 
+	// Convert disks
+	var disks []types.VMDisk
+	for _, disk := range result.VM.Disks {
+		disks = append(disks, types.VMDisk{
+			Label:           disk.Label,
+			CapacityKB:      disk.CapacityKB,
+			CapacityGB:      disk.CapacityKB / 1024 / 1024,
+			DiskPath:        disk.DiskPath,
+			Datastore:       disk.Datastore,
+			ThinProvisioned: disk.ThinProvisioned,
+			DiskMode:        disk.DiskMode,
+		})
+	}
+
+	// Convert network adapters
+	var networkAdapters []types.VMNetworkAdapter
+	for _, adapter := range result.VM.NetworkAdapters {
+		networkAdapters = append(networkAdapters, types.VMNetworkAdapter{
+			Label:       adapter.Label,
+			NetworkName: adapter.NetworkName,
+			MacAddress:  adapter.MacAddress,
+			IPAddresses: adapter.IPAddresses,
+			Connected:   adapter.Connected,
+			AdapterType: adapter.AdapterType,
+		})
+	}
+
+	// Convert snapshots
+	var snapshots []types.VMSnapshot
+	for _, snap := range result.VM.Snapshots {
+		snapshots = append(snapshots, types.VMSnapshot{
+			Name:        snap.Name,
+			Description: snap.Description,
+			CreateTime:  snap.CreateTime,
+			State:       snap.State,
+			Quiesced:    snap.Quiesced,
+			ID:          snap.ID,
+		})
+	}
+
 	// Build detailed response with all available information
 	response := types.VMDetailsResponse{
 		VM: vm,
@@ -168,18 +215,64 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 			RunningStatus: result.VM.ToolsRunningStatus,
 		},
 		GuestInfo: types.VMGuestInfo{
-			Hostname:    result.VM.Hostname,
-			IPAddresses: result.VM.IPAddresses,
-			GuestID:     result.VM.GuestID,
+			Hostname:             result.VM.Hostname,
+			IPAddresses:          result.VM.IPAddresses,
+			GuestID:              result.VM.GuestID,
+			GuestState:           result.VM.GuestState,
+			GuestHeartbeatStatus: result.VM.GuestHeartbeatStatus,
 		},
 		Metadata: types.VMMetadata{
 			InstanceUUID: result.VM.InstanceUUID,
 			BiosUUID:     result.VM.BiosUUID,
 			Annotation:   result.VM.Annotation,
+			Template:     result.VM.Template,
 		},
-		Networks: []types.VMNetworkInfo{},
-		Storage:  []types.VMStorageInfo{},
-		Events:   []types.VMEvent{},
+		Runtime: types.VMRuntimeInfo{
+			Host:                result.VM.Host,
+			ConnectionState:     result.VM.ConnectionState,
+			BootTime:            result.VM.BootTime,
+			UptimeSeconds:       result.VM.UptimeSeconds,
+			MaxCPUUsage:         result.VM.MaxCPUUsage,
+			MaxMemoryUsage:      result.VM.MaxMemoryUsage,
+			ConsolidationNeeded: result.VM.ConsolidationNeeded,
+			FaultToleranceState: result.VM.FaultToleranceState,
+		},
+		Disks:           disks,
+		NetworkAdapters: networkAdapters,
+		Snapshots:       snapshots,
+		CurrentSnapshot: result.VM.CurrentSnapshot,
+		Resources: types.VMResourceInfo{
+			CPUReservationMHz:   result.VM.ResourceAllocation.CPUReservation,
+			CPULimitMHz:         result.VM.ResourceAllocation.CPULimit,
+			CPUShares:           result.VM.ResourceAllocation.CPUShares,
+			CPUSharesLevel:      result.VM.ResourceAllocation.CPUSharesLevel,
+			MemoryReservationMB: result.VM.ResourceAllocation.MemoryReservation,
+			MemoryLimitMB:       result.VM.ResourceAllocation.MemoryLimit,
+			MemoryShares:        result.VM.ResourceAllocation.MemoryShares,
+			MemorySharesLevel:   result.VM.ResourceAllocation.MemorySharesLevel,
+		},
+		Storage: types.VMStorageSummary{
+			CommittedBytes:   result.VM.CommittedStorage,
+			CommittedGB:      result.VM.CommittedStorage / 1024 / 1024 / 1024,
+			UncommittedBytes: result.VM.UncommittedStorage,
+			UncommittedGB:    result.VM.UncommittedStorage / 1024 / 1024 / 1024,
+			Datastores:       result.VM.Datastores,
+		},
+		Files: types.VMFileInfo{
+			VMPathName:  result.VM.VMPathName,
+			ConfigFiles: result.VM.ConfigFiles,
+			LogFiles:    result.VM.LogFiles,
+		},
+		Location: types.VMLocationInfo{
+			Folder:       result.VM.Folder,
+			ResourcePool: result.VM.ResourcePool,
+		},
+		Advanced: types.VMAdvancedInfo{
+			CPUHotAddEnabled:      result.VM.CPUHotAddEnabled,
+			CPUHotRemoveEnabled:   result.VM.CPUHotRemoveEnabled,
+			MemoryHotAddEnabled:   result.VM.MemoryHotAddEnabled,
+			ChangeTrackingEnabled: result.VM.ChangeTrackingEnabled,
+		},
 	}
 
 	h.logger.WithFields(logrus.Fields{
@@ -364,7 +457,7 @@ func (h *VMHandler) InspectClone(c *gin.Context) {
 
 // InspectSnapshot godoc
 // @Summary Inspect a VM snapshot directly
-// @Description Run virt-inspector with VDDK on a VM snapshot without creating a clone
+// @Description Run virt-inspector on a VM snapshot using VDDK
 // @Tags vms
 // @Accept json
 // @Produce json
@@ -400,9 +493,9 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	h.logger.WithFields(logrus.Fields{
 		"vm_name":       vmName,
 		"snapshot_name": snapshotName,
-	}).Info("Inspecting VM snapshot")
+	}).Info("Inspecting VM snapshot with VDDK")
 
-	// Create inspector with extended timeout for VDDK+NBD inspection
+	// Create inspector with extended timeout
 	inspector := inspection.NewInspector("", 30*time.Minute, h.logger)
 
 	// Get vCenter credentials from config
@@ -410,9 +503,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	username := h.vmClient.GetConfig().Username
 	password := h.vmClient.GetConfig().Password
 
-	h.logger.Info("Running virt-inspector with VDDK on snapshot")
-
-	// Get govmomi client for snapshot moref lookup
+	// Get govmomi client
 	govmomiClient, err := h.vmClient.GetClient(c.Request.Context())
 	if err != nil {
 		h.logger.WithError(err).Error("Failed to get govmomi client")
@@ -424,7 +515,8 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Run virt-inspector with VDDK on snapshot
+	// Use VDDK to inspect snapshot directly
+	h.logger.Info("Running virt-inspector with VDDK on snapshot")
 	inspectionData, err := inspector.RunVirtInspectorWithVDDKSnapshot(
 		c.Request.Context(),
 		vmName,
@@ -434,6 +526,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		password,
 		govmomiClient.Client,
 	)
+
 	if err != nil {
 		h.logger.WithError(err).Error("virt-inspector execution failed")
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
@@ -448,7 +541,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		VMName:       vmName,
 		SnapshotName: snapshotName,
 		Status:       "completed",
-		Message:      "Snapshot inspection completed successfully",
+		Message:      "Snapshot inspection completed successfully using VDDK",
 		Data:         inspectionData,
 	}
 

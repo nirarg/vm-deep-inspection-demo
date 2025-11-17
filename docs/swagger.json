@@ -15,7 +15,7 @@
     "paths": {
         "/api/v1/vms": {
             "get": {
-                "description": "Get a list of all virtual machines",
+                "description": "Get a list of all virtual machines with optional name filtering",
                 "consumes": [
                     "application/json"
                 ],
@@ -26,6 +26,15 @@
                     "vms"
                 ],
                 "summary": "List all virtual machines",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web\"",
+                        "description": "Filter VMs where name contains this string",
+                        "name": "name_contains",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "List of virtual machines",
@@ -212,7 +221,7 @@
         },
         "/api/v1/vms/inspect-snapshot": {
             "post": {
-                "description": "Run virt-inspector with VDDK on a VM snapshot without creating a clone",
+                "description": "Run virt-inspector on a VM snapshot using VDDK",
                 "consumes": [
                     "application/json"
                 ],
@@ -690,35 +699,78 @@
                 }
             }
         },
+        "types.VMAdvancedInfo": {
+            "type": "object",
+            "properties": {
+                "change_tracking_enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "cpu_hot_add_enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "cpu_hot_remove_enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "memory_hot_add_enabled": {
+                    "type": "boolean",
+                    "example": false
+                }
+            }
+        },
         "types.VMDetailsResponse": {
             "type": "object",
             "properties": {
+                "advanced": {
+                    "$ref": "#/definitions/types.VMAdvancedInfo"
+                },
+                "current_snapshot": {
+                    "type": "string",
+                    "example": "snapshot-1"
+                },
+                "disks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.VMDisk"
+                    }
+                },
+                "files": {
+                    "$ref": "#/definitions/types.VMFileInfo"
+                },
                 "guest_info": {
                     "$ref": "#/definitions/types.VMGuestInfo"
                 },
                 "hardware": {
                     "$ref": "#/definitions/types.VMHardwareInfo"
                 },
+                "location": {
+                    "$ref": "#/definitions/types.VMLocationInfo"
+                },
                 "metadata": {
                     "$ref": "#/definitions/types.VMMetadata"
                 },
-                "networks": {
+                "network_adapters": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.VMNetworkInfo"
+                        "$ref": "#/definitions/types.VMNetworkAdapter"
                     }
                 },
-                "recent_events": {
+                "resources": {
+                    "$ref": "#/definitions/types.VMResourceInfo"
+                },
+                "runtime": {
+                    "$ref": "#/definitions/types.VMRuntimeInfo"
+                },
+                "snapshots": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/types.VMEvent"
+                        "$ref": "#/definitions/types.VMSnapshot"
                     }
                 },
                 "storage": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.VMStorageInfo"
-                    }
+                    "$ref": "#/definitions/types.VMStorageSummary"
                 },
                 "tools": {
                     "$ref": "#/definitions/types.VMToolsInfo"
@@ -728,37 +780,81 @@
                 }
             }
         },
-        "types.VMEvent": {
+        "types.VMDisk": {
             "type": "object",
             "properties": {
-                "description": {
-                    "type": "string",
-                    "example": "Virtual machine powered on"
+                "capacity_gb": {
+                    "type": "integer",
+                    "example": 50
                 },
-                "event_type": {
-                    "type": "string",
-                    "example": "VmPoweredOnEvent"
+                "capacity_kb": {
+                    "type": "integer",
+                    "example": 52428800
                 },
-                "host": {
+                "datastore": {
                     "type": "string",
-                    "example": "esxi-host-01.example.com"
+                    "example": "datastore1"
                 },
-                "timestamp": {
+                "disk_mode": {
                     "type": "string",
-                    "example": "2024-01-15T14:30:00Z"
+                    "example": "persistent"
                 },
-                "user": {
+                "disk_path": {
                     "type": "string",
-                    "example": "administrator@vsphere.local"
+                    "example": "[datastore1] vm/vm.vmdk"
+                },
+                "label": {
+                    "type": "string",
+                    "example": "Hard disk 1"
+                },
+                "thin_provisioned": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "types.VMFileInfo": {
+            "type": "object",
+            "properties": {
+                "config_files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "[datastore1] vm/vm.vmx",
+                        "[datastore1] vm/vm.nvram"
+                    ]
+                },
+                "log_files": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "[datastore1] vm/vmware.log"
+                    ]
+                },
+                "vm_path_name": {
+                    "type": "string",
+                    "example": "[datastore1] vm/vm.vmx"
                 }
             }
         },
         "types.VMGuestInfo": {
             "type": "object",
             "properties": {
+                "guest_heartbeat_status": {
+                    "type": "string",
+                    "example": "green"
+                },
                 "guest_id": {
                     "type": "string",
                     "example": "rhel9_64Guest"
+                },
+                "guest_state": {
+                    "type": "string",
+                    "example": "running"
                 },
                 "hostname": {
                     "type": "string",
@@ -848,6 +944,19 @@
                 }
             }
         },
+        "types.VMLocationInfo": {
+            "type": "object",
+            "properties": {
+                "folder": {
+                    "type": "string",
+                    "example": "group-v123"
+                },
+                "resource_pool": {
+                    "type": "string",
+                    "example": "resgroup-456"
+                }
+            }
+        },
         "types.VMMetadata": {
             "type": "object",
             "properties": {
@@ -862,12 +971,20 @@
                 "instance_uuid": {
                     "type": "string",
                     "example": "502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"
+                },
+                "template": {
+                    "type": "boolean",
+                    "example": false
                 }
             }
         },
-        "types.VMNetworkInfo": {
+        "types.VMNetworkAdapter": {
             "type": "object",
             "properties": {
+                "adapter_type": {
+                    "type": "string",
+                    "example": "VMXNET3"
+                },
                 "connected": {
                     "type": "boolean",
                     "example": true
@@ -881,42 +998,151 @@
                         "192.168.1.100"
                     ]
                 },
+                "label": {
+                    "type": "string",
+                    "example": "Network adapter 1"
+                },
                 "mac_address": {
                     "type": "string",
                     "example": "00:50:56:9a:12:34"
                 },
-                "name": {
+                "network_name": {
                     "type": "string",
                     "example": "VM Network"
-                },
-                "network_type": {
-                    "type": "string",
-                    "example": "portgroup"
                 }
             }
         },
-        "types.VMStorageInfo": {
+        "types.VMResourceInfo": {
             "type": "object",
             "properties": {
-                "datastore": {
-                    "type": "string",
-                    "example": "datastore1"
-                },
-                "path": {
-                    "type": "string",
-                    "example": "[datastore1] web-server-01/web-server-01.vmdk"
-                },
-                "size_gb": {
+                "cpu_limit_mhz": {
                     "type": "integer",
-                    "example": 50
+                    "example": 4000
                 },
-                "type": {
-                    "type": "string",
-                    "example": "thin"
-                },
-                "used_gb": {
+                "cpu_reservation_mhz": {
                     "type": "integer",
-                    "example": 25
+                    "example": 1000
+                },
+                "cpu_shares": {
+                    "type": "integer",
+                    "example": 1000
+                },
+                "cpu_shares_level": {
+                    "type": "string",
+                    "example": "normal"
+                },
+                "memory_limit_mb": {
+                    "type": "integer",
+                    "example": 8192
+                },
+                "memory_reservation_mb": {
+                    "type": "integer",
+                    "example": 2048
+                },
+                "memory_shares": {
+                    "type": "integer",
+                    "example": 10240
+                },
+                "memory_shares_level": {
+                    "type": "string",
+                    "example": "normal"
+                }
+            }
+        },
+        "types.VMRuntimeInfo": {
+            "type": "object",
+            "properties": {
+                "boot_time": {
+                    "type": "string",
+                    "example": "2024-01-15T10:30:00Z"
+                },
+                "connection_state": {
+                    "type": "string",
+                    "example": "connected"
+                },
+                "consolidation_needed": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "fault_tolerance_state": {
+                    "type": "string",
+                    "example": "notConfigured"
+                },
+                "host": {
+                    "type": "string",
+                    "example": "esxi-01.example.com"
+                },
+                "max_cpu_usage_mhz": {
+                    "type": "integer",
+                    "example": 4800
+                },
+                "max_memory_usage_mb": {
+                    "type": "integer",
+                    "example": 4096
+                },
+                "uptime_seconds": {
+                    "type": "integer",
+                    "example": 86400
+                }
+            }
+        },
+        "types.VMSnapshot": {
+            "type": "object",
+            "properties": {
+                "create_time": {
+                    "type": "string",
+                    "example": "2024-01-15T14:30:00Z"
+                },
+                "description": {
+                    "type": "string",
+                    "example": "Before upgrade"
+                },
+                "id": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "name": {
+                    "type": "string",
+                    "example": "snapshot-1"
+                },
+                "quiesced": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "state": {
+                    "type": "string",
+                    "example": "poweredOff"
+                }
+            }
+        },
+        "types.VMStorageSummary": {
+            "type": "object",
+            "properties": {
+                "committed_bytes": {
+                    "type": "integer",
+                    "example": 5368709120
+                },
+                "committed_gb": {
+                    "type": "integer",
+                    "example": 5
+                },
+                "datastores": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "datastore1",
+                        "datastore2"
+                    ]
+                },
+                "uncommitted_bytes": {
+                    "type": "integer",
+                    "example": 47244640256
+                },
+                "uncommitted_gb": {
+                    "type": "integer",
+                    "example": 45
                 }
             }
         },

@@ -17,12 +17,11 @@ BINARY_NAME=vm-inspector
 BINARY_DIR=./bin
 BINARY_PATH=$(BINARY_DIR)/$(BINARY_NAME)
 MAIN_PATH=./cmd/server
-
 # Build flags
 LDFLAGS=-ldflags "-s -w"
 BUILD_FLAGS=-trimpath
 
-.PHONY: all build clean deps docker-build docker-build-vddk docker-run docker-run-vddk docker-stop docker-logs docker-shell docker-test-virt docker-test-vddk swagger help run run-config
+.PHONY: all build clean deps docker-build docker-run docker-stop docker-logs docker-shell docker-test-virt docker-test-vddk swagger help run run-config
 
 all: deps build
 
@@ -54,29 +53,38 @@ deps:
 # Container Targets (Basic)
 # =============================================================================
 
-## Build Docker/Podman image locally (includes libguestfs/virt-inspector)
+## Build Docker/Podman image with VDDK support (requires VDDK in vmware-vix-disklib-distrib/)
 docker-build:
-	@echo "Building container image with libguestfs support using $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) build -t $(LOCAL_IMAGE_NAME) .
-	@echo "Container image built: $(LOCAL_IMAGE_NAME)"
+	@echo "Building container image with VDDK support using $(CONTAINER_RUNTIME)..."
+	@if [ ! -d "vmware-vix-disklib-distrib" ]; then \
+		echo "ERROR: VDDK not found!"; \
+		echo "Please download VDDK from https://developer.vmware.com/web/sdk/8.0/vddk"; \
+		echo "Extract to: vmware-vix-disklib-distrib/"; \
+		echo "See docs/GETTING-STARTED.md for instructions"; \
+		exit 1; \
+	fi
+	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) .
+	@echo "Container image with VDDK built: $(LOCAL_IMAGE_NAME)"
 
-## Run container in background
+## Run container in background (with VDDK support)
 docker-run:
-	@echo "Starting container in background using $(CONTAINER_RUNTIME)..."
+	@echo "Starting container with VDDK support in background using $(CONTAINER_RUNTIME)..."
 	@$(CONTAINER_RUNTIME) rm -f vm-inspector 2>/dev/null || true
 	$(CONTAINER_RUNTIME) run -d \
 		-p 8080:8080 \
 		-v $(PWD)/config.yaml:/etc/vm-inspector/config.yaml:ro \
 		--privileged \
+		--device /dev/kvm:/dev/kvm \
 		--name vm-inspector \
 		$(LOCAL_IMAGE_NAME)
-	@echo "Container started: vm-inspector"
+	@echo "Container started: vm-inspector (with VDDK)"
 	@echo "API available at: http://localhost:8080"
 	@echo ""
 	@echo "Useful commands:"
-	@echo "  make docker-logs    - View container logs"
-	@echo "  make docker-shell   - Open shell in container"
-	@echo "  make docker-stop    - Stop container"
+	@echo "  make docker-logs       - View container logs"
+	@echo "  make docker-shell      - Open shell in container"
+	@echo "  make docker-test-vddk  - Test VDDK/nbdkit"
+	@echo "  make docker-stop       - Stop container"
 
 ## Stop container
 docker-stop:
@@ -94,52 +102,6 @@ docker-shell:
 	@echo "Opening shell in container..."
 	@echo "Test virt-inspector with: virt-inspector --version"
 	$(CONTAINER_RUNTIME) exec -it vm-inspector bash
-
-## Test virt-inspector availability in container
-docker-test-virt:
-	@echo "Testing virt-inspector in container..."
-	@$(CONTAINER_RUNTIME) exec vm-inspector virt-inspector --version 2>/dev/null || \
-		echo "Container not running. Start it with: make docker-run"
-
-# =============================================================================
-# Container Targets (VDDK Support)
-# =============================================================================
-
-## Build Docker/Podman image with VDDK support
-docker-build-vddk:
-	@echo "Building container image with VDDK support using $(CONTAINER_RUNTIME)..."
-	@if [ ! -d "vmware-vix-disklib-distrib" ]; then \
-		echo "ERROR: VDDK not found!"; \
-		echo "Please download VDDK from https://developer.vmware.com/web/sdk/8.0/vddk"; \
-		echo "Extract to: vmware-vix-disklib-distrib/"; \
-		echo "See docs/GETTING-STARTED.md for instructions"; \
-		exit 1; \
-	fi
-	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME)-vddk .
-	@echo "Container image with VDDK built: $(LOCAL_IMAGE_NAME)-vddk"
-	@echo ""
-	@echo "VDDK libraries included:"
-	@ls -lh vmware-vix-disklib-distrib/lib64/libvixDiskLib.so*
-
-## Run container with VDDK support in background
-docker-run-vddk:
-	@echo "Starting container with VDDK support in background using $(CONTAINER_RUNTIME)..."
-	@$(CONTAINER_RUNTIME) rm -f vm-inspector 2>/dev/null || true
-	$(CONTAINER_RUNTIME) run -d \
-		-p 8080:8080 \
-		-v $(PWD)/config.yaml:/etc/vm-inspector/config.yaml:ro \
-		--privileged \
-		--device /dev/kvm:/dev/kvm \
-		--name vm-inspector \
-		$(LOCAL_IMAGE_NAME)-vddk
-	@echo "Container started: vm-inspector (with VDDK)"
-	@echo "API available at: http://localhost:8080"
-	@echo ""
-	@echo "Useful commands:"
-	@echo "  make docker-logs       - View container logs"
-	@echo "  make docker-shell      - Open shell in container"
-	@echo "  make docker-test-vddk  - Test VDDK/nbdkit"
-	@echo "  make docker-stop       - Stop container"
 
 ## Test VDDK and nbdkit availability in container
 docker-test-vddk:

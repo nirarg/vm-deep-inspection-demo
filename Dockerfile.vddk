@@ -2,10 +2,10 @@
 #
 # Build Requirements:
 # - VMware VDDK 8.0.3 must be downloaded from VMware and extracted to ./vmware-vix-disklib-distrib/
-# - See docs/VDDK-IMPLEMENTATION-GUIDE.md for download instructions
+# - See docs/GETTING-STARTED.md for download instructions
 #
-# Build: make docker-build-vddk
-# Run:   make docker-run-vddk
+# Build: make docker-build
+# Run:   make docker-run
 
 # Build stage
 FROM golang:1.24-alpine AS builder

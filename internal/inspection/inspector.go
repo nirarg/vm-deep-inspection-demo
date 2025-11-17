@@ -43,58 +43,6 @@ func NewInspector(virtInspectorPath string, timeout time.Duration, logger *logru
 	}
 }
 
-// RunVirtInspector executes virt-inspector on a VM
-func (i *Inspector) RunVirtInspector(ctx context.Context, vmName string, vcenterURL string, username string, password string) (*apitypes.InspectionData, error) {
-	i.logger.WithFields(logrus.Fields{
-		"vm_name":     vmName,
-		"vcenter_url": vcenterURL,
-	}).Info("Running virt-inspector")
-
-	// Parse vCenter URL to extract hostname
-	parsedURL, err := url.Parse(vcenterURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse vCenter URL: %w", err)
-	}
-	vcenterHost := parsedURL.Hostname()
-
-	// URL-encode username (may contain @ symbol)
-	encodedUsername := url.QueryEscape(username)
-
-	// Build VMware connection string
-	// Format: vpx://username@vcenter/vm-name?no_verify=1
-	// Note: Simplified format without datacenter path
-	connectionString := fmt.Sprintf("vpx://%s@%s/%s?no_verify=1", encodedUsername, vcenterHost, vmName)
-
-	// Create context with timeout
-	timeoutCtx, cancel := context.WithTimeout(ctx, i.timeout)
-	defer cancel()
-
-	// Build command
-	cmd := exec.CommandContext(timeoutCtx, i.virtInspectorPath, "-a", connectionString)
-
-	// Set password via environment
-	cmd.Env = append(cmd.Env, fmt.Sprintf("LIBGUESTFS_BACKEND_SETTINGS=password=%s", password))
-
-	i.logger.Debug("Executing virt-inspector command")
-
-	// Execute command
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil, fmt.Errorf("virt-inspector execution failed: %w, output: %s", err, string(output))
-	}
-
-	i.logger.Debug("virt-inspector completed, parsing output")
-
-	// Parse XML output
-	inspectionData, err := i.ParseInspectionXML(output)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse inspection output: %w", err)
-	}
-
-	i.logger.Info("Inspection completed successfully")
-	return inspectionData, nil
-}
-
 // ParseInspectionXML parses virt-inspector XML output
 func (i *Inspector) ParseInspectionXML(xmlData []byte) (*apitypes.InspectionData, error) {
 	// virt-inspector XML structure

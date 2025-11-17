@@ -11,14 +11,12 @@ This guide walks you through setting up and running the VM Deep Inspection Demo 
 - **vSphere Credentials** - Service account with appropriate permissions
 - **Container Runtime** - Docker or Podman (for containerized deployment)
 
-### Optional (for full inspection capabilities)
+### Required (for inspection capabilities)
 
-- **VMware VDDK 8.0.3** - For deep disk inspection (see [VDDK-IMPLEMENTATION-GUIDE.md](./VDDK-IMPLEMENTATION-GUIDE.md))
+- **VMware VDDK 8.0.3** - Required for deep disk inspection
 - **KVM support** - For running libguestfs (Linux host or VM with nested virtualization)
 
-## Quick Start (Basic Mode)
-
-This mode provides snapshot management and VM cloning without deep inspection.
+## Quick Start
 
 ### 1. Clone the Repository
 
@@ -95,46 +93,10 @@ View the Swagger UI:
 http://localhost:8080/swagger/index.html
 ```
 
-## Container Deployment (Basic Mode)
 
-### Using Podman (Recommended)
+## VDDK Setup (Required for Inspection)
 
-```bash
-# Build the container image
-make docker-build CONTAINER_RUNTIME=podman
-
-# Run the container
-make docker-run CONTAINER_RUNTIME=podman
-```
-
-### Using Docker
-
-```bash
-# Build the container image
-make docker-build CONTAINER_RUNTIME=docker
-
-# Run the container
-make docker-run CONTAINER_RUNTIME=docker
-```
-
-### Verify Container is Running
-
-```bash
-# Check container status
-podman ps
-# or
-docker ps
-
-# View logs
-make docker-logs
-
-# Test the API
-curl http://localhost:8080/health
-```
-
-## Advanced Setup (With VDDK for Deep Inspection)
-
-For full deep inspection capabilities, you need to set up VDDK support.
+VDDK is required for all inspection operations. Follow these steps to set it up.
 
 ### 1. Download VMware VDDK
 
@@ -170,10 +132,10 @@ vm-deep-inspection-demo/
 
 ```bash
 # Build image with VDDK support
-make docker-build-vddk
+make docker-build
 
 # Run container with VDDK
-make docker-run-vddk
+make docker-run
 ```
 
 ### 4. Verify VDDK Installation
@@ -191,8 +153,48 @@ nbdkit vddk --version
 # Test virt-inspector
 virt-inspector --version
 
+# Or use the test command
+make docker-test-vddk
+
 # Exit the container
 exit
+```
+
+## Container Deployment (VDDK Required)
+
+### Using Podman (Recommended)
+
+```bash
+# Build the container image (requires VDDK)
+make docker-build CONTAINER_RUNTIME=podman
+
+# Run the container
+make docker-run CONTAINER_RUNTIME=podman
+```
+
+### Using Docker
+
+```bash
+# Build the container image (requires VDDK)
+make docker-build CONTAINER_RUNTIME=docker
+
+# Run the container
+make docker-run CONTAINER_RUNTIME=docker
+```
+
+### Verify Container is Running
+
+```bash
+# Check container status
+podman ps
+# or
+docker ps
+
+# View logs
+make docker-logs
+
+# Test the API
+curl http://localhost:8080/health
 ```
 
 ## Testing the Service
@@ -203,27 +205,36 @@ exit
 curl http://localhost:8080/api/v1/vms | jq
 ```
 
+### List VMs - only with name contains specific string
+
+```bash
+export CONTAINS_STR=your-unique-string
+curl http://localhost:8080/api/v1/vms?name_contains=$CONTAINS_STR | jq
+```
+
 ### Get Specific VM
 
 ```bash
-curl http://localhost:8080/api/v1/vms/your-vm-name | jq
+export VM_NAME=your-vm-name
+curl http://localhost:8080/api/v1/vms/$VM_NAME | jq
 ```
 
 ### Create Snapshot
 
 ```bash
-curl -X POST "http://localhost:8080/api/v1/vms/snapshot" \
+export VM_NAME=your-vm-name
+export SNAPSHOT_NAME=new-snapshot-name
+curl -X POST "http://localhost:8080/api/v1/vms/snapshot?name=$VM_NAME" \
   -H "Content-Type: application/json" \
-  -d '{
-    "vm_name": "your-vm-name",
-    "snapshot_name": "test-snapshot",
-    "description": "Test snapshot for inspection",
-    "memory": false,
-    "quiesce": true
-  }' | jq
+  -d "{
+    \"name\": \"$SNAPSHOT_NAME\",
+    \"description\": \"Test snapshot for inspection\",
+    \"memory\": false,
+    \"quiesce\": true
+  }" | jq
 ```
 
-### Inspect Snapshot (VDDK Required)
+### Inspect Snapshot
 
 ```bash
 curl -X POST "http://localhost:8080/api/v1/vms/inspect-snapshot?vm=your-vm-name&snapshot=test-snapshot" | jq
@@ -363,7 +374,7 @@ curl -k https://your-vcenter.example.com/sdk
 
 **Check**:
 - VDDK is extracted to `vmware-vix-disklib-distrib/`
-- Built with `make docker-build-vddk` (not `docker-build`)
+- Built with `make docker-build` (which now uses Dockerfile.vddk)
 - `LD_LIBRARY_PATH` is set correctly in container
 
 **Verify**:

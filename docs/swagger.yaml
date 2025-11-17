@@ -209,53 +209,114 @@ definitions:
         example: 502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g
         type: string
     type: object
+  types.VMAdvancedInfo:
+    properties:
+      change_tracking_enabled:
+        example: false
+        type: boolean
+      cpu_hot_add_enabled:
+        example: false
+        type: boolean
+      cpu_hot_remove_enabled:
+        example: false
+        type: boolean
+      memory_hot_add_enabled:
+        example: false
+        type: boolean
+    type: object
   types.VMDetailsResponse:
     properties:
+      advanced:
+        $ref: '#/definitions/types.VMAdvancedInfo'
+      current_snapshot:
+        example: snapshot-1
+        type: string
+      disks:
+        items:
+          $ref: '#/definitions/types.VMDisk'
+        type: array
+      files:
+        $ref: '#/definitions/types.VMFileInfo'
       guest_info:
         $ref: '#/definitions/types.VMGuestInfo'
       hardware:
         $ref: '#/definitions/types.VMHardwareInfo'
+      location:
+        $ref: '#/definitions/types.VMLocationInfo'
       metadata:
         $ref: '#/definitions/types.VMMetadata'
-      networks:
+      network_adapters:
         items:
-          $ref: '#/definitions/types.VMNetworkInfo'
+          $ref: '#/definitions/types.VMNetworkAdapter'
         type: array
-      recent_events:
+      resources:
+        $ref: '#/definitions/types.VMResourceInfo'
+      runtime:
+        $ref: '#/definitions/types.VMRuntimeInfo'
+      snapshots:
         items:
-          $ref: '#/definitions/types.VMEvent'
+          $ref: '#/definitions/types.VMSnapshot'
         type: array
       storage:
-        items:
-          $ref: '#/definitions/types.VMStorageInfo'
-        type: array
+        $ref: '#/definitions/types.VMStorageSummary'
       tools:
         $ref: '#/definitions/types.VMToolsInfo'
       vm:
         $ref: '#/definitions/types.VM'
     type: object
-  types.VMEvent:
+  types.VMDisk:
     properties:
-      description:
-        example: Virtual machine powered on
+      capacity_gb:
+        example: 50
+        type: integer
+      capacity_kb:
+        example: 52428800
+        type: integer
+      datastore:
+        example: datastore1
         type: string
-      event_type:
-        example: VmPoweredOnEvent
+      disk_mode:
+        example: persistent
         type: string
-      host:
-        example: esxi-host-01.example.com
+      disk_path:
+        example: '[datastore1] vm/vm.vmdk'
         type: string
-      timestamp:
-        example: "2024-01-15T14:30:00Z"
+      label:
+        example: Hard disk 1
         type: string
-      user:
-        example: administrator@vsphere.local
+      thin_provisioned:
+        example: true
+        type: boolean
+    type: object
+  types.VMFileInfo:
+    properties:
+      config_files:
+        example:
+        - '[datastore1] vm/vm.vmx'
+        - '[datastore1] vm/vm.nvram'
+        items:
+          type: string
+        type: array
+      log_files:
+        example:
+        - '[datastore1] vm/vmware.log'
+        items:
+          type: string
+        type: array
+      vm_path_name:
+        example: '[datastore1] vm/vm.vmx'
         type: string
     type: object
   types.VMGuestInfo:
     properties:
+      guest_heartbeat_status:
+        example: green
+        type: string
       guest_id:
         example: rhel9_64Guest
+        type: string
+      guest_state:
+        example: running
         type: string
       hostname:
         example: web-server-01
@@ -319,6 +380,15 @@ definitions:
           $ref: '#/definitions/types.VM'
         type: array
     type: object
+  types.VMLocationInfo:
+    properties:
+      folder:
+        example: group-v123
+        type: string
+      resource_pool:
+        example: resgroup-456
+        type: string
+    type: object
   types.VMMetadata:
     properties:
       annotation:
@@ -330,9 +400,15 @@ definitions:
       instance_uuid:
         example: 502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g
         type: string
+      template:
+        example: false
+        type: boolean
     type: object
-  types.VMNetworkInfo:
+  types.VMNetworkAdapter:
     properties:
+      adapter_type:
+        example: VMXNET3
+        type: string
       connected:
         example: true
         type: boolean
@@ -342,32 +418,111 @@ definitions:
         items:
           type: string
         type: array
+      label:
+        example: Network adapter 1
+        type: string
       mac_address:
         example: 00:50:56:9a:12:34
         type: string
-      name:
+      network_name:
         example: VM Network
         type: string
-      network_type:
-        example: portgroup
+    type: object
+  types.VMResourceInfo:
+    properties:
+      cpu_limit_mhz:
+        example: 4000
+        type: integer
+      cpu_reservation_mhz:
+        example: 1000
+        type: integer
+      cpu_shares:
+        example: 1000
+        type: integer
+      cpu_shares_level:
+        example: normal
+        type: string
+      memory_limit_mb:
+        example: 8192
+        type: integer
+      memory_reservation_mb:
+        example: 2048
+        type: integer
+      memory_shares:
+        example: 10240
+        type: integer
+      memory_shares_level:
+        example: normal
         type: string
     type: object
-  types.VMStorageInfo:
+  types.VMRuntimeInfo:
     properties:
-      datastore:
-        example: datastore1
+      boot_time:
+        example: "2024-01-15T10:30:00Z"
         type: string
-      path:
-        example: '[datastore1] web-server-01/web-server-01.vmdk'
+      connection_state:
+        example: connected
         type: string
-      size_gb:
-        example: 50
+      consolidation_needed:
+        example: false
+        type: boolean
+      fault_tolerance_state:
+        example: notConfigured
+        type: string
+      host:
+        example: esxi-01.example.com
+        type: string
+      max_cpu_usage_mhz:
+        example: 4800
         type: integer
-      type:
-        example: thin
+      max_memory_usage_mb:
+        example: 4096
+        type: integer
+      uptime_seconds:
+        example: 86400
+        type: integer
+    type: object
+  types.VMSnapshot:
+    properties:
+      create_time:
+        example: "2024-01-15T14:30:00Z"
         type: string
-      used_gb:
-        example: 25
+      description:
+        example: Before upgrade
+        type: string
+      id:
+        example: 1
+        type: integer
+      name:
+        example: snapshot-1
+        type: string
+      quiesced:
+        example: true
+        type: boolean
+      state:
+        example: poweredOff
+        type: string
+    type: object
+  types.VMStorageSummary:
+    properties:
+      committed_bytes:
+        example: 5368709120
+        type: integer
+      committed_gb:
+        example: 5
+        type: integer
+      datastores:
+        example:
+        - datastore1
+        - datastore2
+        items:
+          type: string
+        type: array
+      uncommitted_bytes:
+        example: 47244640256
+        type: integer
+      uncommitted_gb:
+        example: 45
         type: integer
     type: object
   types.VMToolsInfo:
@@ -396,7 +551,13 @@ paths:
     get:
       consumes:
       - application/json
-      description: Get a list of all virtual machines
+      description: Get a list of all virtual machines with optional name filtering
+      parameters:
+      - description: Filter VMs where name contains this string
+        example: '"web"'
+        in: query
+        name: name_contains
+        type: string
       produces:
       - application/json
       responses:
@@ -565,8 +726,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Run virt-inspector with VDDK on a VM snapshot without creating
-        a clone
+      description: Run virt-inspector on a VM snapshot using VDDK
       parameters:
       - description: Original VM name
         example: '"web-server-01"'
