@@ -32,12 +32,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
 # Using CentOS Stream 9 (upstream for RHEL 9, has all required packages)
 FROM quay.io/centos/centos:stream9
 
-# Install libguestfs, nbdkit, and dependencies
+# Install libguestfs, virt-v2v, nbdkit, and dependencies
 # All packages are available in CentOS Stream 9 repos
+# Note: virt-v2v uses nbdkit-vddk-plugin internally for VDDK support
 RUN dnf install -y --allowerasing \
     libguestfs \
     libguestfs-tools \
     libguestfs-tools-c \
+    virt-v2v \
     qemu-kvm \
     nbdkit \
     nbdkit-vddk-plugin \
@@ -56,10 +58,11 @@ COPY vmware-vix-disklib-distrib /opt/vmware-vix-disklib/
 # Set VDDK library path for nbdkit-vddk-plugin
 ENV LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64:$LD_LIBRARY_PATH
 
-# Verify VDDK installation
+# Verify VDDK and virt-v2v installation
 RUN echo "Verifying VDDK installation..." && \
     ls -la /opt/vmware-vix-disklib/lib64/libvixDiskLib.so* && \
-    nbdkit vddk --version || echo "nbdkit-vddk-plugin installed"
+    nbdkit vddk --version || echo "nbdkit-vddk-plugin installed" && \
+    virt-v2v-open --version || echo "virt-v2v installed"
 
 # Create application user
 RUN useradd -m -u 1001 -s /bin/bash appuser

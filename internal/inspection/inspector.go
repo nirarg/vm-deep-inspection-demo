@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/google/uuid"
 	apitypes "github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi/find"
@@ -171,13 +170,13 @@ func (i *Inspector) ParseInspectionXML(xmlData []byte) (*apitypes.InspectionData
 	return data, nil
 }
 
-// RunVirtInspectorWithVDDK uses nbdkit-vddk plugin for full disk inspection
-// This method requires VMware VDDK to be installed and nbdkit-vddk-plugin available
+// RunVirtInspectorWithVDDK uses virt-v2v-open with VDDK for full disk inspection
+// This method requires VMware VDDK to be installed and virt-v2v available
 func (i *Inspector) RunVirtInspectorWithVDDK(ctx context.Context, vmName string, vcenterURL string, username string, password string, vmClient interface{}) (*apitypes.InspectionData, error) {
 	i.logger.WithFields(logrus.Fields{
 		"vm_name":     vmName,
 		"vcenter_url": vcenterURL,
-	}).Info("Running virt-inspector with VDDK/nbdkit")
+	}).Info("Running virt-inspector with VDDK via virt-v2v-open")
 
 	// Parse vCenter URL to extract hostname
 	parsedURL, err := url.Parse(vcenterURL)
@@ -208,61 +207,33 @@ func (i *Inspector) RunVirtInspectorWithVDDK(ctx context.Context, vmName string,
 		i.logger.WithField("thumbprint", thumbprint).Debug("Got vCenter thumbprint")
 	}
 
-	// Create temporary socket for nbdkit
-	socketPath := fmt.Sprintf("/tmp/nbdkit-%s.sock", uuid.New().String())
-	defer os.Remove(socketPath)
+	// Build virt-v2v-open command with VDDK input transport
+	// virt-v2v-open uses -it vddk to directly connect to VMware via VDDK
+	// This eliminates the need for nbdkit and socket management
+	i.logger.Info("Running virt-inspector via virt-v2v-open with VDDK")
 
-	i.logger.WithField("socket", socketPath).Debug("Starting nbdkit with VDDK plugin")
-
-	// For linked clones, we need to open with snapshot reference
-	// Use single-link mode which reads from the current VM state
-	nbdkitArgs := []string{
-		"-U", socketPath,     // Unix socket path
-		"--foreground",       // Run in foreground
-		"--exit-with-parent", // Exit when parent process exits
-		"vddk",               // VDDK plugin
-		fmt.Sprintf("server=%s", vcenterHost),
-		fmt.Sprintf("user=%s", username),
-		fmt.Sprintf("password=%s", password),
-		fmt.Sprintf("vm=moref=%s", moref),
-		fmt.Sprintf("file=%s", diskPath),    // VMDK file path
-		"libdir=/opt/vmware-vix-disklib",    // VDDK library location
-		"single-link=true",                  // Read current state (works with clones)
-	}
-
-	// Add thumbprint if available (for SSL verification)
-	if thumbprint != "" {
-		nbdkitArgs = append(nbdkitArgs, fmt.Sprintf("thumbprint=%s", thumbprint))
-	}
-
-	// Start nbdkit with VDDK plugin
-	nbdkitCmd := exec.CommandContext(ctx, "nbdkit", nbdkitArgs...)
-
-	if err := nbdkitCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start nbdkit: %w", err)
-	}
-
-	// Ensure nbdkit is killed when we're done
-	defer func() {
-		if nbdkitCmd.Process != nil {
-			nbdkitCmd.Process.Kill()
-		}
-	}()
-
-	// Wait for socket to be ready
-	if err := i.waitForSocket(socketPath, 30*time.Second); err != nil {
-		return nil, fmt.Errorf("nbdkit socket not ready: %w", err)
-	}
-
-	// Create context with timeout for virt-inspector
+	// Create context with timeout
 	inspectCtx, cancel := context.WithTimeout(ctx, i.timeout)
 	defer cancel()
 
-	// Run virt-inspector on the NBD socket
-	i.logger.WithField("socket", socketPath).Info("Running virt-inspector on nbdkit socket")
-	virtInspectorCmd := exec.CommandContext(inspectCtx, i.virtInspectorPath,
-		"-a", fmt.Sprintf("nbd+unix:///?socket=%s", socketPath),
-	)
+	// Build VDDK connection parameters for virt-v2v-open
+	// Format: server=HOST,user=USER,password=PASS,vm=moref=MOREF,file=PATH,libdir=DIR,single-link=true
+	vddkParams := fmt.Sprintf("server=%s,user=%s,password=%s,vm=moref=%s,file=%s,libdir=/opt/vmware-vix-disklib,single-link=true",
+		vcenterHost, username, password, moref, diskPath)
+
+	// Add thumbprint if available
+	if thumbprint != "" {
+		vddkParams += fmt.Sprintf(",thumbprint=%s", thumbprint)
+	}
+
+	// virt-v2v-open command structure:
+	// virt-v2v-open -it vddk -ip "PARAMS" --run 'COMMAND'
+	// The @@ placeholder in the command is replaced with the disk device path
+	// CRITICAL: Unset LD_LIBRARY_PATH to avoid VDDK library conflicts
+	cmdString := fmt.Sprintf("unset LD_LIBRARY_PATH && virt-v2v-open -it vddk -ip '%s' --run '%s --format=raw -a @@'",
+		vddkParams, i.virtInspectorPath)
+
+	virtInspectorCmd := exec.CommandContext(inspectCtx, "sh", "-c", cmdString)
 
 	output, err := virtInspectorCmd.CombinedOutput()
 	if err != nil {
@@ -281,7 +252,8 @@ func (i *Inspector) RunVirtInspectorWithVDDK(ctx context.Context, vmName string,
 	return inspectionData, nil
 }
 
-// RunVirtInspectorWithVDDKSnapshot uses nbdkit-vddk plugin to inspect a VM snapshot directly
+// RunVirtInspectorWithVDDKSnapshot uses virt-v2v-open with VDDK to inspect a VM snapshot directly
+// This replaces the previous nbdkit-based approach and simplifies the implementation
 func (i *Inspector) RunVirtInspectorWithVDDKSnapshot(ctx context.Context, vmName string, snapshotName string, vcenterURL string, username string, password string, vmClient interface{}) (*apitypes.InspectionData, error) {
 	i.logger.WithFields(logrus.Fields{
 		"vm_name":       vmName,
@@ -325,68 +297,31 @@ func (i *Inspector) RunVirtInspectorWithVDDKSnapshot(ctx context.Context, vmName
 		i.logger.WithField("thumbprint", thumbprint).Debug("Got vCenter thumbprint")
 	}
 
-	// Create temporary socket for nbdkit
-	socketPath := fmt.Sprintf("/tmp/nbdkit-%s.sock", uuid.New().String())
-	defer os.Remove(socketPath)
+	// Build virt-v2v-open command with VDDK input transport
+	// virt-v2v-open uses -it vddk to directly connect to VMware via VDDK
+	// This eliminates the need for nbdkit and socket management
+	i.logger.Info("Running virt-inspector via virt-v2v-open with VDDK")
 
-	i.logger.WithField("socket", socketPath).Debug("Starting nbdkit with VDDK plugin for snapshot")
-
-	// Build nbdkit command arguments for snapshot access
-	// Note: When using snapshot parameter, we specify the base VMDK file (not the delta disk)
-	// and MUST use readonly mode (-r flag) since snapshots are read-only by definition
-	nbdkitArgs := []string{
-		"-U", socketPath,     // Unix socket path
-		"--foreground",       // Run in foreground
-		"--exit-with-parent", // Exit when parent process exits
-		"-r",                 // Read-only mode for snapshots
-		"vddk",               // VDDK plugin
-		fmt.Sprintf("server=%s", vcenterHost),
-		fmt.Sprintf("user=%s", username),
-		fmt.Sprintf("password=%s", password),
-		fmt.Sprintf("vm=moref=%s", vmMoref),       // VM moref (required)
-		fmt.Sprintf("snapshot=%s", snapshotMoref), // Snapshot moref to read from
-		fmt.Sprintf("file=%s", baseDiskPath),      // Base VMDK file path (without -XXXXXX suffix)
-		"libdir=/opt/vmware-vix-disklib",          // VDDK library location
-	}
-
-	// Add thumbprint if available (for SSL verification)
-	if thumbprint != "" {
-		nbdkitArgs = append(nbdkitArgs, fmt.Sprintf("thumbprint=%s", thumbprint))
-	}
-
-	// Start nbdkit with VDDK plugin
-	nbdkitCmd := exec.CommandContext(ctx, "nbdkit", nbdkitArgs...)
-
-	if err := nbdkitCmd.Start(); err != nil {
-		return nil, fmt.Errorf("failed to start nbdkit: %w", err)
-	}
-
-	// Ensure nbdkit is killed when we're done
-	defer func() {
-		if nbdkitCmd.Process != nil {
-			nbdkitCmd.Process.Kill()
-		}
-	}()
-
-	// Wait for socket to be ready
-	if err := i.waitForSocket(socketPath, 30*time.Second); err != nil {
-		return nil, fmt.Errorf("nbdkit socket not ready: %w", err)
-	}
-
-	// Create context with timeout for virt-inspector
+	// Create context with timeout
 	inspectCtx, cancel := context.WithTimeout(ctx, i.timeout)
 	defer cancel()
 
-	// Run virt-inspector on the NBD socket
-	// Use --format=raw to avoid disk format probing issues with NBD
-	//
-	// CRITICAL: Use shell wrapper to explicitly unset LD_LIBRARY_PATH before running virt-inspector
-	// This ensures virt-inspector and ALL its child processes (libguestfs, supermin, qemu)
-	// have a clean environment without VDDK's libcrypto.so.3, which conflicts with system libraries.
-	i.logger.WithField("socket", socketPath).Info("Running virt-inspector on nbdkit socket")
+	// Build VDDK connection parameters for virt-v2v-open
+	// Format: server=HOST,user=USER,password=PASS,vm=moref=MOREF,snapshot=SNAPSHOT,file=PATH,libdir=DIR
+	vddkParams := fmt.Sprintf("server=%s,user=%s,password=%s,vm=moref=%s,snapshot=%s,file=%s,libdir=/opt/vmware-vix-disklib",
+		vcenterHost, username, password, vmMoref, snapshotMoref, baseDiskPath)
 
-	cmdString := fmt.Sprintf("unset LD_LIBRARY_PATH && %s --format=raw -a 'nbd+unix:///?socket=%s'",
-		i.virtInspectorPath, socketPath)
+	// Add thumbprint if available
+	if thumbprint != "" {
+		vddkParams += fmt.Sprintf(",thumbprint=%s", thumbprint)
+	}
+
+	// virt-v2v-open command structure:
+	// virt-v2v-open -it vddk -ip "PARAMS" --run 'COMMAND'
+	// The @@ placeholder in the command is replaced with the disk device path
+	// CRITICAL: Unset LD_LIBRARY_PATH to avoid VDDK library conflicts
+	cmdString := fmt.Sprintf("unset LD_LIBRARY_PATH && virt-v2v-open -it vddk -ip '%s' --run '%s --format=raw -a @@'",
+		vddkParams, i.virtInspectorPath)
 
 	virtInspectorCmd := exec.CommandContext(inspectCtx, "sh", "-c", cmdString)
 
@@ -575,26 +510,6 @@ func (i *Inspector) getVCenterThumbprint(vcenterHost string) (string, error) {
 	}
 
 	return formatted, nil
-}
-
-// waitForSocket waits for a Unix socket to be created
-func (i *Inspector) waitForSocket(socketPath string, timeout time.Duration) error {
-	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ticker.C:
-			if _, err := os.Stat(socketPath); err == nil {
-				// Socket exists
-				return nil
-			}
-			if time.Now().After(deadline) {
-				return fmt.Errorf("timeout waiting for socket after %v", timeout)
-			}
-		}
-	}
 }
 
 // getBaseDiskPath removes the -XXXXXX delta disk suffix to get the base VMDK path
