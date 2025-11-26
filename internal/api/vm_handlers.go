@@ -377,84 +377,6 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// InspectClone godoc
-// @Summary Inspect a cloned VM
-// @Description Run virt-inspector on a cloned VM
-// @Tags vms
-// @Accept json
-// @Produce json
-// @Param name query string true "Clone VM name" example("web-server-01-clone-123")
-// @Success 200 {object} types.VMInspectionResponse "Inspection completed successfully"
-// @Failure 400 {object} types.ErrorResponse "Invalid request"
-// @Failure 404 {object} types.ErrorResponse "Clone not found"
-// @Failure 500 {object} types.ErrorResponse "Internal server error"
-// @Router /api/v1/vms/inspect-clone [post]
-func (h *VMHandler) InspectClone(c *gin.Context) {
-	cloneName := c.Query("name")
-	if cloneName == "" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "Clone name is required",
-			Code:    "MISSING_CLONE_NAME",
-			Details: "Please provide clone name as query parameter: ?name=xxx",
-		})
-		return
-	}
-
-	h.logger.WithField("clone_name", cloneName).Info("Inspecting clone")
-
-	// Create inspector with extended timeout for VDDK+NBD inspection
-	inspector := inspection.NewInspector("", 30*time.Minute, h.logger)
-
-	// Get vCenter credentials from config
-	vcenterURL := h.vmClient.GetConfig().VCenterURL
-	username := h.vmClient.GetConfig().Username
-	password := h.vmClient.GetConfig().Password
-
-	h.logger.Info("Running virt-inspector with VDDK on clone")
-
-	// Get govmomi client for moref lookup
-	govmomiClient, err := h.vmClient.GetClient(c.Request.Context())
-	if err != nil {
-		h.logger.WithError(err).Error("Failed to get govmomi client")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: "Failed to connect to vSphere for inspection",
-		})
-		return
-	}
-
-	// Run virt-inspector with VDDK
-	inspectionData, err := inspector.RunVirtInspectorWithVDDK(
-		c.Request.Context(),
-		cloneName,
-		vcenterURL,
-		username,
-		password,
-		govmomiClient.Client,
-	)
-	if err != nil {
-		h.logger.WithError(err).Error("virt-inspector execution failed")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
-
-	response := types.VMInspectionResponse{
-		VMName:       cloneName,
-		SnapshotName: "",
-		Status:       "completed",
-		Message:      "Inspection completed successfully",
-		Data:         inspectionData,
-	}
-
-	h.logger.Info("Inspection completed successfully")
-	c.JSON(http.StatusOK, response)
-}
-
 // InspectSnapshot godoc
 // @Summary Inspect a VM snapshot directly
 // @Description Run virt-inspector on a VM snapshot using VDDK
@@ -496,35 +418,34 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	}).Info("Inspecting VM snapshot with VDDK")
 
 	// Create inspector with extended timeout
-	inspector := inspection.NewInspector("", 30*time.Minute, h.logger)
+	inspector := inspection.NewVirtInspector("", 30*time.Minute, h.logger)
 
 	// Get vCenter credentials from config
 	vcenterURL := h.vmClient.GetConfig().VCenterURL
 	username := h.vmClient.GetConfig().Username
 	password := h.vmClient.GetConfig().Password
 
-	// Get govmomi client
-	govmomiClient, err := h.vmClient.GetClient(c.Request.Context())
+	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
 	if err != nil {
-		h.logger.WithError(err).Error("Failed to get govmomi client")
+		h.logger.WithError(err).Error("failed to get datacenter name")
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
 			Error:   "Inspection failed",
 			Code:    "INSPECTION_FAILED",
-			Details: "Failed to connect to vSphere for inspection",
+			Details: err.Error(),
 		})
 		return
 	}
 
 	// Use VDDK to inspect snapshot directly
 	h.logger.Info("Running virt-inspector with VDDK on snapshot")
-	inspectionData, err := inspector.RunVirtInspectorWithVDDKSnapshot(
+	inspectionData, err := inspector.Inspect(
 		c.Request.Context(),
 		vmName,
 		snapshotName,
 		vcenterURL,
+		datacenter,
 		username,
 		password,
-		govmomiClient.Client,
 	)
 
 	if err != nil {

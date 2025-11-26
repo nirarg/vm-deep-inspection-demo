@@ -1,91 +1,80 @@
-# Dockerfile with VDDK Support for Full VM Disk Inspection
-#
-# Build Requirements:
-# - VMware VDDK 8.0.3 must be downloaded from VMware and extracted to ./vmware-vix-disklib-distrib/
-# - See docs/GETTING-STARTED.md for download instructions
-#
-# Build: make docker-build
-# Run:   make docker-run
-
-# Build stage
+# ============================================================
+# Builder stage – builds Go binary only (no VDDK needed here)
+# ============================================================
 FROM golang:1.24-alpine AS builder
 
-# Install ca-certificates and git
+# Basic build tools
 RUN apk add --no-cache ca-certificates git
 
-# Set working directory
 WORKDIR /app
 
-# Copy go mod files
+# Copy go mod files first (better cache usage)
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
 
-# Copy source code
+# Copy rest of the source
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main ./cmd/server
+# Build static binary
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o vm-inspector ./cmd/server
 
-# Runtime stage with libguestfs + VDDK support
-# Using CentOS Stream 9 (upstream for RHEL 9, has all required packages)
+
+# ============================================================
+# Runtime stage – RHEL-compatible (CentOS Stream 9)
+# ============================================================
 FROM quay.io/centos/centos:stream9
 
-# Install libguestfs, nbdkit, and dependencies
-# All packages are available in CentOS Stream 9 repos
+# Install required runtime packages only
+# Everything here is needed for:
+# - virt-inspector
+# - virt-v2v-open
+# - nbd
+# - VDDK (mounted from host)
 RUN dnf install -y --allowerasing \
     libguestfs \
     libguestfs-tools \
     libguestfs-tools-c \
+    virt-v2v \
     qemu-kvm \
     nbdkit \
     nbdkit-vddk-plugin \
-    ca-certificates \
     curl \
+    ca-certificates \
     && dnf clean all
 
-# Set libguestfs backend to direct (no libvirt needed)
+# libguestfs doesn’t need libvirt
 ENV LIBGUESTFS_BACKEND=direct
 
-# Copy and install VDDK library
-# NOTE: This directory must be present in build context
-# Download from: https://developer.vmware.com/web/sdk/8.0/vddk
-COPY vmware-vix-disklib-distrib /opt/vmware-vix-disklib/
+# NOTE:
+# VDDK IS NOT INSIDE THE IMAGE!
+# It will be mounted at runtime:
+#
+#   -v /opt/vmware-vix-disklib:/opt/vmware-vix-disklib
+#   -e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64
+#
 
-# Set VDDK library path for nbdkit-vddk-plugin
-ENV LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64:$LD_LIBRARY_PATH
-
-# Verify VDDK installation
-RUN echo "Verifying VDDK installation..." && \
-    ls -la /opt/vmware-vix-disklib/lib64/libvixDiskLib.so* && \
-    nbdkit vddk --version || echo "nbdkit-vddk-plugin installed"
-
-# Create application user
+# Create an unprivileged user
 RUN useradd -m -u 1001 -s /bin/bash appuser
 
-# Create necessary directories
-RUN mkdir -p /var/tmp/guestfs /app /tmp/nbdkit && \
-    chown -R appuser:appuser /var/tmp/guestfs /app /tmp/nbdkit
+# Required directories
+RUN mkdir -p /var/tmp/guestfs /tmp/nbdkit /app && \
+    chown -R appuser:appuser /var/tmp/guestfs /tmp/nbdkit /app
 
 WORKDIR /app
 
-# Copy the binary from builder stage
-COPY --from=builder /app/main ./vm-inspector
+# Copy binary from builder stage
+COPY --from=builder /app/vm-inspector ./vm-inspector
 
-# Change ownership to non-root user
 RUN chown appuser:appuser /app/vm-inspector && \
     chmod +x /app/vm-inspector
 
-# Switch to non-root user
 USER appuser
 
-# Expose port
 EXPOSE 8080
 
-# Health check
+# Healthcheck (optional)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
+  CMD curl -f http://localhost:8080/health || exit 1
 
-# Run the application
+# Start the service
 CMD ["./vm-inspector", "-config", "/etc/vm-inspector/config.yaml"]

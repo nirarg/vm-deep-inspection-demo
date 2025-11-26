@@ -94,7 +94,6 @@ func main() {
 
 		// Clone and inspection routes
 		v1.POST("/vms/clone", vmHandler.CreateClone)
-		v1.POST("/vms/inspect-clone", vmHandler.InspectClone)
 		v1.DELETE("/vms/delete-clone", vmHandler.DeleteClone)
 
 		// Snapshot inspection route (direct inspection without clone)
