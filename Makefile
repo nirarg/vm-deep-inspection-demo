@@ -55,7 +55,7 @@ deps:
 
 docker-build:
 	@echo "Building container image (VDDK is mounted at runtime) using $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile -t $(LOCAL_IMAGE_NAME) .
+	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) .
 	@echo "Container image built: $(LOCAL_IMAGE_NAME)"
 
 docker-run:
@@ -66,8 +66,8 @@ docker-run:
 		-p 8080:8080 \
 		-v $(PWD)/config.yaml:/etc/vm-inspector/config.yaml:ro \
 		-v /opt/vmware-vix-disklib:/opt/vmware-vix-disklib:ro \
-		-e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64 \
 		-e LIBGUESTFS_BACKEND=direct \
+		-e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64 \
 		--privileged \
 		--device /dev/kvm:/dev/kvm \
 		--name vm-inspector \

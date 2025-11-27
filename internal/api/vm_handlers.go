@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -436,6 +437,19 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
+	// Get snapshot disk info (morefs and disk path) from vm_service
+	h.logger.Debug("Getting snapshot disk info from vm_service")
+	diskInfo, err := h.vmService.GetSnapshotDiskInfo(c.Request.Context(), vmName, snapshotName)
+	if err != nil {
+		h.logger.WithError(err).Error("failed to get snapshot disk info")
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Error:   "Inspection failed",
+			Code:    "INSPECTION_FAILED",
+			Details: fmt.Sprintf("failed to get snapshot disk info: %v", err),
+		})
+		return
+	}
+
 	// Use VDDK to inspect snapshot directly
 	h.logger.Info("Running virt-inspector with VDDK on snapshot")
 	inspectionData, err := inspector.Inspect(
@@ -446,6 +460,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		datacenter,
 		username,
 		password,
+		diskInfo, // Pass snapshot disk info from vm_service
 	)
 
 	if err != nil {

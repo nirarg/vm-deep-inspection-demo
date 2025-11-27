@@ -3,12 +3,17 @@ package inspection
 import (
 	"context"
 	"fmt"
-	"time"
 	"os/exec"
+	"time"
 
+	"github.com/nirarg/vm-deep-inspection-demo/internal/types"
 	apitypes "github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
 )
+
+// UseVirtV2VOpen controls whether to use virt-v2v-open (true) or nbdkit directly (false)
+// Default is false (use nbdkit directly)
+const UseVirtV2VOpen = false
 
 // Inspector handles VM inspection operations
 type VirtInspector struct {
@@ -32,7 +37,6 @@ func NewVirtInspector(virtInspectorPath string, timeout time.Duration, logger *l
 	}
 }
 
-// Inspect uses nbdkit-vddk plugin to inspect a VM snapshot directly
 func (i *VirtInspector) Inspect(
 	ctx context.Context,
 	vmName string,
@@ -41,54 +45,115 @@ func (i *VirtInspector) Inspect(
 	datacenter string,
 	username string,
 	password string,
+	diskInfo *types.SnapshotDiskInfo, // Snapshot disk info from vm_service
 ) (*apitypes.InspectionData, error) {
 
-	i.logger.WithFields(logrus.Fields{
-		"vm_name":       vmName,
-		"snapshot_name": snapshotName,
-		"vcenter_url":   vcenterURL,
-		"datacenter":    datacenter,
-	}).Info("Running virt-inspector using virt-v2v-open (VDDK + snapshot)")
+	var nbdURL string
+	var sessionCloser func()
 
-	openCtx, cancel := context.WithTimeout(ctx, i.timeout)
-	defer cancel()
+	if UseVirtV2VOpen {
+		i.logger.WithFields(logrus.Fields{
+			"vm_name":       vmName,
+			"snapshot_name": snapshotName,
+			"vcenter_url":   vcenterURL,
+			"datacenter":    datacenter,
+		}).Info("Running virt-inspector using virt-v2v-open (VDDK + snapshot)")
 
-	// ✅ Step 1: Open remote disk via virt-v2v-open
-	v2vSession, err := OpenWithVirtV2V(
-		openCtx,
-		vmName,
-		datacenter,
-		snapshotName,
-		vcenterURL,
-		username,
-		password,
-	)
-	if err != nil {
-		return nil, err
+		openCtx, cancel := context.WithTimeout(ctx, i.timeout)
+		defer cancel()
+
+		v2vSession, err := OpenWithVirtV2V(
+			openCtx,
+			vmName,
+			datacenter,
+			snapshotName,
+			vcenterURL,
+			username,
+			password,
+		)
+		if err != nil {
+			return nil, err
+		}
+		nbdURL = v2vSession.NBDURL
+		sessionCloser = v2vSession.Close
+
+		// Give NBD time to initialize
+		time.Sleep(4 * time.Second)
+	} else {
+		i.logger.WithFields(logrus.Fields{
+			"vm_name":       vmName,
+			"snapshot_name": snapshotName,
+			"vcenter_url":   vcenterURL,
+			"datacenter":    datacenter,
+		}).Info("Running virt-inspector using nbdkit-vddk (VDDK + snapshot)")
+
+		// Use diskInfo passed from vm_service (no need to query vSphere here)
+		i.logger.WithFields(logrus.Fields{
+			"vm_moref":       diskInfo.VMMoref,
+			"snapshot_moref": diskInfo.SnapshotMoref,
+			"disk_path":      diskInfo.DiskPath,
+			"base_disk_path": diskInfo.BaseDiskPath,
+		}).Debug("Using snapshot disk info from vm_service")
+
+		openCtx, cancel := context.WithTimeout(ctx, i.timeout)
+		defer cancel()
+
+		nbdkitSession, err := OpenWithNBDKitVDDK(
+			openCtx,
+			diskInfo.VMMoref,
+			diskInfo.SnapshotMoref,
+			diskInfo.BaseDiskPath,
+			vcenterURL,
+			username,
+			password,
+			i.logger,
+		)
+		if err != nil {
+			return nil, err
+		}
+		nbdURL = nbdkitSession.NBDURL
+		sessionCloser = nbdkitSession.Close
+
+		// Wait for NBD server to be ready (more reliable than sleep)
+		if err := nbdkitSession.WaitForReady(30 * time.Second); err != nil {
+			i.logger.WithError(err).Error("NBD server not ready")
+			nbdkitSession.Close()
+			return nil, fmt.Errorf("NBD server not ready: %w", err)
+		}
 	}
-	defer v2vSession.Close()
+	defer sessionCloser()
 
-	// Give NBD time to initialize
-	time.Sleep(4 * time.Second)
-
-	// ✅ Step 2: Run virt-inspector on NBD
 	inspectCtx, cancel := context.WithTimeout(ctx, i.timeout)
 	defer cancel()
 
-	i.logger.WithField("nbd_url", v2vSession.NBDURL).Info("Running virt-inspector on NBD")
+	i.logger.WithField("nbd_url", nbdURL).Info("Running virt-inspector on NBD")
 
-	cmdString := fmt.Sprintf(
-		"unset LD_LIBRARY_PATH && %s --format=raw -a %s",
-		i.virtInspectorPath,
-		v2vSession.NBDURL,
-	)
+	cmdString := fmt.Sprintf("unset LD_LIBRARY_PATH && %s --format=raw -a '%s'",
+		i.virtInspectorPath, nbdURL)
 
 	virtInspectorCmd := exec.CommandContext(inspectCtx, "sh", "-c", cmdString)
 
 	output, err := virtInspectorCmd.CombinedOutput()
 	if err != nil {
-		i.logger.WithField("output", string(output)).Error("virt-inspector failed")
-		return nil, fmt.Errorf("virt-inspector failed: %w", err)
+		// Get exit code if available
+		exitCode := -1
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		}
+		
+		outputStr := string(output)
+		i.logger.WithFields(logrus.Fields{
+			"output":    outputStr,
+			"exit_code": exitCode,
+			"nbd_url":   nbdURL,
+			"command":   cmdString,
+		}).Error("virt-inspector failed")
+		
+		// Include output in error message for better debugging
+		if outputStr != "" {
+			return nil, fmt.Errorf("virt-inspector failed (exit code %d): %w\nOutput: %s", exitCode, err, outputStr)
+		}
+		return nil, fmt.Errorf("virt-inspector failed (exit code %d): %w", exitCode, err)
 	}
 
 	inspectionData, err := ParseInspectionXML(output)
@@ -96,6 +161,10 @@ func (i *VirtInspector) Inspect(
 		return nil, fmt.Errorf("failed to parse inspection output: %w", err)
 	}
 
-	i.logger.Info("virt-v2v-open snapshot inspection completed successfully")
+	if UseVirtV2VOpen {
+		i.logger.Info("virt-v2v-open snapshot inspection completed successfully")
+	} else {
+		i.logger.Info("nbdkit-vddk snapshot inspection completed successfully")
+	}
 	return inspectionData, nil
 }

@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nirarg/vm-deep-inspection-demo/internal/types"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25/mo"
-	"github.com/vmware/govmomi/vim25/types"
+	vimtypes "github.com/vmware/govmomi/vim25/types"
 )
 
 // VMService provides VM discovery and management functionality
@@ -431,7 +432,7 @@ func (s *VMService) ListVMs(ctx context.Context, filter VMFilter) (*VMListResult
 	s.logger.WithField("vm_count", len(vms)).Info("Found VMs in vSphere")
 
 	// Collect VM managed object references
-	var vmRefs []types.ManagedObjectReference
+	var vmRefs []vimtypes.ManagedObjectReference
 	for _, vm := range vms {
 		vmRefs = append(vmRefs, vm.Reference())
 	}
@@ -670,18 +671,146 @@ func (s *VMService) convertToVMDetailedInfo(vm mo.VirtualMachine) *VMDetailedInf
 	return info
 }
 
+// GetSnapshotDiskInfo gets the VM moref, snapshot moref and disk path for a VM snapshot
+// This is used by the inspection system to access snapshot disks via VDDK
+func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snapshotName string) (*types.SnapshotDiskInfo, error) {
+	s.logger.WithFields(logrus.Fields{
+		"vm_name":       vmName,
+		"snapshot_name": snapshotName,
+	}).Debug("Getting snapshot disk info for inspection")
+
+	// Find VM by name
+	vm, _, err := s.findVMByName(ctx, vmName)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the VM managed object reference value
+	vmMoref := vm.Reference().Value
+
+	// Get VM properties including snapshots and disk config
+	client, err := s.client.GetClient(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get vSphere client: %w", err)
+	}
+
+	var vmMo mo.VirtualMachine
+	pc := property.DefaultCollector(client.Client)
+	err = pc.RetrieveOne(ctx, vm.Reference(), []string{"snapshot", "config.hardware.device"}, &vmMo)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get VM properties: %w", err)
+	}
+
+	// Check if VM has snapshots
+	if vmMo.Snapshot == nil {
+		return nil, fmt.Errorf("VM '%s' has no snapshots", vmName)
+	}
+
+	// Find the snapshot by name
+	snapshotRef, err := s.findSnapshotInTree(vmMo.Snapshot.RootSnapshotList, snapshotName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find snapshot '%s': %w", snapshotName, err)
+	}
+
+	// Get snapshot moref
+	snapshotMoref := snapshotRef.Snapshot.Value
+
+	// Get disk path from first virtual disk
+	var diskPath string
+	for _, device := range vmMo.Config.Hardware.Device {
+		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
+			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
+				diskPath = backing.FileName
+				break
+			}
+		}
+	}
+
+	if diskPath == "" {
+		return nil, fmt.Errorf("no disk found for VM '%s'", vmName)
+	}
+
+	// Calculate base disk path (remove delta disk suffix like -000002)
+	baseDiskPath := s.getBaseDiskPath(diskPath)
+
+	s.logger.WithFields(logrus.Fields{
+		"vm_moref":       vmMoref,
+		"snapshot_moref": snapshotMoref,
+		"disk_path":      diskPath,
+		"base_disk_path": baseDiskPath,
+	}).Debug("Got snapshot disk info")
+
+	return &types.SnapshotDiskInfo{
+		VMMoref:       vmMoref,
+		SnapshotMoref: snapshotMoref,
+		DiskPath:      diskPath,
+		BaseDiskPath:  baseDiskPath,
+	}, nil
+}
+
+// findSnapshotInTree recursively searches for a snapshot by name in the snapshot tree
+func (s *VMService) findSnapshotInTree(snapshots []vimtypes.VirtualMachineSnapshotTree, name string) (*vimtypes.VirtualMachineSnapshotTree, error) {
+	for idx := range snapshots {
+		if snapshots[idx].Name == name {
+			return &snapshots[idx], nil
+		}
+		// Search in child snapshots
+		if len(snapshots[idx].ChildSnapshotList) > 0 {
+			result, err := s.findSnapshotInTree(snapshots[idx].ChildSnapshotList, name)
+			if err == nil {
+				return result, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("snapshot '%s' not found", name)
+}
+
+// getBaseDiskPath removes the -XXXXXX delta disk suffix to get the base VMDK path
+// Example: "[datastore] vm/vm-000002.vmdk" -> "[datastore] vm/vm.vmdk"
+func (s *VMService) getBaseDiskPath(diskPath string) string {
+	// Find the last occurrence of .vmdk
+	vmdkIndex := len(diskPath) - len(".vmdk")
+	if vmdkIndex < 0 || diskPath[vmdkIndex:] != ".vmdk" {
+		// Not a .vmdk file, return as-is
+		return diskPath
+	}
+
+	// Find the part before .vmdk
+	prefix := diskPath[:vmdkIndex]
+
+	// Look for -XXXXXX pattern (6 digits) before .vmdk
+	// Example: "vm-000002" -> "vm"
+	if len(prefix) >= 7 && prefix[len(prefix)-7] == '-' {
+		// Check if last 6 characters are digits
+		isAllDigits := true
+		for i := len(prefix) - 6; i < len(prefix); i++ {
+			if prefix[i] < '0' || prefix[i] > '9' {
+				isAllDigits = false
+				break
+			}
+		}
+		if isAllDigits {
+			// Remove -XXXXXX suffix
+			return prefix[:len(prefix)-7] + ".vmdk"
+		}
+	}
+
+	// No delta disk suffix found, return original path
+	return diskPath
+}
+
 // extractDiskInfo extracts disk information from hardware devices
-func (s *VMService) extractDiskInfo(devices []types.BaseVirtualDevice) []VMDiskInfo {
+func (s *VMService) extractDiskInfo(devices []vimtypes.BaseVirtualDevice) []VMDiskInfo {
 	var disks []VMDiskInfo
 	for _, device := range devices {
-		if disk, ok := device.(*types.VirtualDisk); ok {
+		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
 			diskInfo := VMDiskInfo{
 				Label:         disk.DeviceInfo.GetDescription().Label,
 				CapacityKB:    disk.CapacityInKB,
 				ControllerKey: disk.ControllerKey,
 			}
 
-			if backing, ok := disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo); ok {
+			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
 				diskInfo.DiskPath = backing.FileName
 				diskInfo.ThinProvisioned = *backing.ThinProvisioned
 				diskInfo.DiskMode = backing.DiskMode
@@ -698,7 +827,7 @@ func (s *VMService) extractDiskInfo(devices []types.BaseVirtualDevice) []VMDiskI
 }
 
 // extractNetworkAdapters extracts network adapter information from hardware devices
-func (s *VMService) extractNetworkAdapters(devices []types.BaseVirtualDevice, guest *types.GuestInfo) []VMNetworkAdapterInfo {
+func (s *VMService) extractNetworkAdapters(devices []vimtypes.BaseVirtualDevice, guest *vimtypes.GuestInfo) []VMNetworkAdapterInfo {
 	var adapters []VMNetworkAdapterInfo
 
 	// Create a map of MAC to IPs from guest info
@@ -722,28 +851,28 @@ func (s *VMService) extractNetworkAdapters(devices []types.BaseVirtualDevice, gu
 		var connected bool
 
 		switch nic := device.(type) {
-		case *types.VirtualE1000:
+		case *vimtypes.VirtualE1000:
 			label = nic.DeviceInfo.GetDescription().Label
 			mac = nic.MacAddress
 			connected = nic.Connectable != nil && nic.Connectable.Connected
 			adapterType = "E1000"
-			if backing, ok := nic.Backing.(*types.VirtualEthernetCardNetworkBackingInfo); ok {
+			if backing, ok := nic.Backing.(*vimtypes.VirtualEthernetCardNetworkBackingInfo); ok {
 				network = backing.DeviceName
 			}
-		case *types.VirtualE1000e:
+		case *vimtypes.VirtualE1000e:
 			label = nic.DeviceInfo.GetDescription().Label
 			mac = nic.MacAddress
 			connected = nic.Connectable != nil && nic.Connectable.Connected
 			adapterType = "E1000e"
-			if backing, ok := nic.Backing.(*types.VirtualEthernetCardNetworkBackingInfo); ok {
+			if backing, ok := nic.Backing.(*vimtypes.VirtualEthernetCardNetworkBackingInfo); ok {
 				network = backing.DeviceName
 			}
-		case *types.VirtualVmxnet3:
+		case *vimtypes.VirtualVmxnet3:
 			label = nic.DeviceInfo.GetDescription().Label
 			mac = nic.MacAddress
 			connected = nic.Connectable != nil && nic.Connectable.Connected
 			adapterType = "VMXNET3"
-			if backing, ok := nic.Backing.(*types.VirtualEthernetCardNetworkBackingInfo); ok {
+			if backing, ok := nic.Backing.(*vimtypes.VirtualEthernetCardNetworkBackingInfo); ok {
 				network = backing.DeviceName
 			}
 		default:
@@ -765,7 +894,7 @@ func (s *VMService) extractNetworkAdapters(devices []types.BaseVirtualDevice, gu
 }
 
 // extractSnapshotInfo recursively extracts snapshot information
-func (s *VMService) extractSnapshotInfo(snapshots []types.VirtualMachineSnapshotTree) []VMSnapshotInfo {
+func (s *VMService) extractSnapshotInfo(snapshots []vimtypes.VirtualMachineSnapshotTree) []VMSnapshotInfo {
 	var result []VMSnapshotInfo
 	for _, snap := range snapshots {
 		info := VMSnapshotInfo{
@@ -787,7 +916,7 @@ func (s *VMService) extractSnapshotInfo(snapshots []types.VirtualMachineSnapshot
 }
 
 // FindSnapshotByName finds a snapshot by name on a VM
-func (s *VMService) FindSnapshotByName(ctx context.Context, vmName string, snapshotName string) (*types.ManagedObjectReference, error) {
+func (s *VMService) FindSnapshotByName(ctx context.Context, vmName string, snapshotName string) (*vimtypes.ManagedObjectReference, error) {
 	s.logger.WithFields(logrus.Fields{
 		"vm_name":       vmName,
 		"snapshot_name": snapshotName,
@@ -817,8 +946,8 @@ func (s *VMService) FindSnapshotByName(ctx context.Context, vmName string, snaps
 	}
 
 	// Search for snapshot by name
-	var findSnapshot func(tree []types.VirtualMachineSnapshotTree) *types.ManagedObjectReference
-	findSnapshot = func(tree []types.VirtualMachineSnapshotTree) *types.ManagedObjectReference {
+	var findSnapshot func(tree []vimtypes.VirtualMachineSnapshotTree) *vimtypes.ManagedObjectReference
+	findSnapshot = func(tree []vimtypes.VirtualMachineSnapshotTree) *vimtypes.ManagedObjectReference {
 		for _, node := range tree {
 			if node.Name == snapshotName {
 				return &node.Snapshot
@@ -842,7 +971,7 @@ func (s *VMService) FindSnapshotByName(ctx context.Context, vmName string, snaps
 }
 
 // CreateLinkedClone creates a linked clone from a snapshot
-func (s *VMService) CreateLinkedClone(ctx context.Context, vmName string, snapshotRef *types.ManagedObjectReference, cloneName string) error {
+func (s *VMService) CreateLinkedClone(ctx context.Context, vmName string, snapshotRef *vimtypes.ManagedObjectReference, cloneName string) error {
 	s.logger.WithFields(logrus.Fields{
 		"vm_name":    vmName,
 		"clone_name": cloneName,
@@ -870,9 +999,9 @@ func (s *VMService) CreateLinkedClone(ctx context.Context, vmName string, snapsh
 	}
 
 	// Create linked clone spec
-	cloneSpec := types.VirtualMachineCloneSpec{
-		Location: types.VirtualMachineRelocateSpec{
-			DiskMoveType: string(types.VirtualMachineRelocateDiskMoveOptionsCreateNewChildDiskBacking),
+	cloneSpec := vimtypes.VirtualMachineCloneSpec{
+		Location: vimtypes.VirtualMachineRelocateSpec{
+			DiskMoveType: string(vimtypes.VirtualMachineRelocateDiskMoveOptionsCreateNewChildDiskBacking),
 		},
 		Snapshot: snapshotRef,
 		PowerOn:  false,

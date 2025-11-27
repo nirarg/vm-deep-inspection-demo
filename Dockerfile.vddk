@@ -1,35 +1,24 @@
 # ============================================================
-# Builder stage – builds Go binary only (no VDDK needed here)
+# Builder stage – builds Go binary only
 # ============================================================
-FROM golang:1.24-alpine AS builder
+FROM golang:1.24-alpine AS go-builder
 
-# Basic build tools
 RUN apk add --no-cache ca-certificates git
 
 WORKDIR /app
 
-# Copy go mod files first (better cache usage)
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Copy rest of the source
 COPY . .
 
-# Build static binary
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o vm-inspector ./cmd/server
-
 
 # ============================================================
 # Runtime stage – RHEL-compatible (CentOS Stream 9)
 # ============================================================
 FROM quay.io/centos/centos:stream9
 
-# Install required runtime packages only
-# Everything here is needed for:
-# - virt-inspector
-# - virt-v2v-open
-# - nbd
-# - VDDK (mounted from host)
 RUN dnf install -y --allowerasing \
     libguestfs \
     libguestfs-tools \
@@ -40,41 +29,78 @@ RUN dnf install -y --allowerasing \
     nbdkit-vddk-plugin \
     curl \
     ca-certificates \
-    && dnf clean all
+    && dnf clean all \
+    && echo "Verifying nbdkit installation..." \
+    && (nbdkit --version || echo "WARNING: nbdkit command not found in PATH") \
+    && (rpm -ql nbdkit | head -5 || echo "WARNING: nbdkit package files not found") \
+    && echo "nbdkit installation verified"
 
-# libguestfs doesn’t need libvirt
 ENV LIBGUESTFS_BACKEND=direct
-
-# NOTE:
-# VDDK IS NOT INSIDE THE IMAGE!
-# It will be mounted at runtime:
-#
-#   -v /opt/vmware-vix-disklib:/opt/vmware-vix-disklib
-#   -e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64
-#
+ENV LD_LIBRARY_PATH=""
 
 # Create an unprivileged user
 RUN useradd -m -u 1001 -s /bin/bash appuser
 
-# Required directories
 RUN mkdir -p /var/tmp/guestfs /tmp/nbdkit /app && \
     chown -R appuser:appuser /var/tmp/guestfs /tmp/nbdkit /app
 
 WORKDIR /app
 
-# Copy binary from builder stage
-COPY --from=builder /app/vm-inspector ./vm-inspector
+COPY --from=go-builder /app/vm-inspector ./vm-inspector
 
 RUN chown appuser:appuser /app/vm-inspector && \
     chmod +x /app/vm-inspector
+
+# ---------- FIX START ----------
+# Create wrappers for tools that need VDDK libraries
+# virt-v2v wrapper
+RUN if [ -f /usr/bin/virt-v2v ]; then \
+    mv /usr/bin/virt-v2v /usr/bin/virt-v2v.real && \
+    printf '#!/bin/bash\n\
+export LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64\n\
+exec /usr/bin/virt-v2v.real "$@"\n' > /usr/bin/virt-v2v && \
+    chmod +x /usr/bin/virt-v2v; \
+    fi
+
+# nbdkit wrapper (for VDDK plugin)
+# Find nbdkit binary location from installed package
+RUN NBDKIT_PATH=$(rpm -ql nbdkit 2>/dev/null | grep -E '^/usr/bin/nbdkit$|^/usr/sbin/nbdkit$' | head -1) && \
+    if [ -z "$NBDKIT_PATH" ]; then \
+        NBDKIT_PATH=$(command -v nbdkit 2>/dev/null || echo ""); \
+    fi && \
+    if [ -z "$NBDKIT_PATH" ]; then \
+        for path in /usr/bin/nbdkit /usr/sbin/nbdkit /usr/local/bin/nbdkit; do \
+            if [ -f "$path" ] 2>/dev/null; then \
+                NBDKIT_PATH="$path"; \
+                break; \
+            fi; \
+        done; \
+    fi && \
+    if [ -n "$NBDKIT_PATH" ] && [ -f "$NBDKIT_PATH" ]; then \
+        mv "$NBDKIT_PATH" "${NBDKIT_PATH}.real" && \
+        printf '#!/bin/bash\n\
+if [ -z "$LD_LIBRARY_PATH" ]; then\n\
+  export LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64\n\
+else\n\
+  export LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64:$LD_LIBRARY_PATH\n\
+fi\n\
+exec "%s.real" "$@"\n' "$NBDKIT_PATH" > "$NBDKIT_PATH" && \
+        chmod +x "$NBDKIT_PATH" && \
+        echo "Created nbdkit wrapper at $NBDKIT_PATH"; \
+    else \
+        echo "ERROR: nbdkit binary not found after installation!"; \
+        echo "Attempting to locate nbdkit:"; \
+        rpm -ql nbdkit 2>/dev/null | grep -E 'bin/nbdkit|sbin/nbdkit' || echo "No nbdkit binary found in package"; \
+        which nbdkit 2>/dev/null || echo "nbdkit not in PATH"; \
+        echo "Wrapper not created - nbdkit will use LD_LIBRARY_PATH from environment"; \
+    fi
+# ---------- FIX END ----------
 
 USER appuser
 
 EXPOSE 8080
 
-# Healthcheck (optional)
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8080/health || exit 1
 
-# Start the service
 CMD ["./vm-inspector", "-config", "/etc/vm-inspector/config.yaml"]
