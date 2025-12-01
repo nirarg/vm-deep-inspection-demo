@@ -380,12 +380,13 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 
 // InspectSnapshot godoc
 // @Summary Inspect a VM snapshot directly
-// @Description Run virt-inspector on a VM snapshot using VDDK
+// @Description Run virt-inspector or virt-v2v-inspector on a VM snapshot using VDDK
 // @Tags vms
 // @Accept json
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
+// @Param inspector query string false "Inspector type: 'virt-inspector' (default) or 'virt-v2v-inspector'" example("virt-inspector")
 // @Success 200 {object} types.VMInspectionResponse "Inspection completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
@@ -394,6 +395,7 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	vmName := c.Query("vm")
 	snapshotName := c.Query("snapshot")
+	inspectorType := c.DefaultQuery("inspector", "virt-inspector") // Default to virt-inspector
 
 	if vmName == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
@@ -414,17 +416,29 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	}
 
 	h.logger.WithFields(logrus.Fields{
-		"vm_name":       vmName,
-		"snapshot_name": snapshotName,
+		"vm_name":        vmName,
+		"snapshot_name":  snapshotName,
+		"inspector_type": inspectorType,
 	}).Info("Inspecting VM snapshot with VDDK")
 
-	// Create inspector with extended timeout
-	inspector := inspection.NewVirtInspector("", 30*time.Minute, h.logger)
+	// Validate inspector type
+	if inspectorType != "virt-inspector" && inspectorType != "virt-v2v-inspector" {
+		c.JSON(http.StatusBadRequest, types.ErrorResponse{
+			Error:   "Invalid inspector type",
+			Code:    "INVALID_INSPECTOR_TYPE",
+			Details: fmt.Sprintf("inspector must be 'virt-inspector' or 'virt-v2v-inspector', got: %s", inspectorType),
+		})
+		return
+	}
 
 	// Get vCenter credentials from config
 	vcenterURL := h.vmClient.GetConfig().VCenterURL
 	username := h.vmClient.GetConfig().Username
 	password := h.vmClient.GetConfig().Password
+	
+	// SSL verification option for vpx:// URL
+	// Using no_verify=1 for now to simplify (can be enhanced later with certificate support)
+	sslVerify := "no_verify=1"
 
 	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
 	if err != nil {
@@ -450,21 +464,41 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Use VDDK to inspect snapshot directly
-	h.logger.Info("Running virt-inspector with VDDK on snapshot")
-	inspectionData, err := inspector.Inspect(
-		c.Request.Context(),
-		vmName,
-		snapshotName,
-		vcenterURL,
-		datacenter,
-		username,
-		password,
-		diskInfo, // Pass snapshot disk info from vm_service
-	)
+	// Use the selected inspector to inspect snapshot
+	var inspectionData *types.InspectionData
+
+	if inspectorType == "virt-v2v-inspector" {
+		inspector := inspection.NewVirtV2vInspector("", 30*time.Minute, h.logger)
+		h.logger.Info("Running virt-v2v-inspector with VDDK on snapshot")
+		inspectionData, err = inspector.Inspect(
+			c.Request.Context(),
+			vmName,
+			snapshotName,
+			vcenterURL,
+			datacenter,
+			username,
+			password,
+			diskInfo,
+			sslVerify,
+		)
+	} else {
+		// Default: use virt-inspector
+		inspector := inspection.NewVirtInspector("", 30*time.Minute, h.logger)
+		h.logger.Info("Running virt-inspector with VDDK on snapshot")
+		inspectionData, err = inspector.Inspect(
+			c.Request.Context(),
+			vmName,
+			snapshotName,
+			vcenterURL,
+			datacenter,
+			username,
+			password,
+			diskInfo,
+		)
+	}
 
 	if err != nil {
-		h.logger.WithError(err).Error("virt-inspector execution failed")
+		h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
 			Error:   "Inspection failed",
 			Code:    "INSPECTION_FAILED",
@@ -473,15 +507,17 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
+	// Build response message based on inspector type
+	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
 	response := types.VMInspectionResponse{
 		VMName:       vmName,
 		SnapshotName: snapshotName,
 		Status:       "completed",
-		Message:      "Snapshot inspection completed successfully using VDDK",
+		Message:      message,
 		Data:         inspectionData,
 	}
 
-	h.logger.Info("Snapshot inspection completed successfully")
+	h.logger.WithField("inspector_type", inspectorType).Info("Snapshot inspection completed successfully")
 	c.JSON(http.StatusOK, response)
 }
 

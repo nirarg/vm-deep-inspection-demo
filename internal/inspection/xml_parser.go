@@ -23,7 +23,7 @@ func ParseInspectionXML(xmlData []byte) (*apitypes.InspectionData, error) {
 			PackageFormat     string `xml:"package_format"`
 			PackageManagement string `xml:"package_management"`
 			OSInfo            string `xml:"osinfo"`
-			Applications struct {
+			Applications      struct {
 				Application []struct {
 					Name        string `xml:"name"`
 					Version     string `xml:"version"`
@@ -130,6 +130,96 @@ func ParseInspectionXML(xmlData []byte) (*apitypes.InspectionData, error) {
 		data.Drives = append(data.Drives, apitypes.Drive{
 			Name: drive.Name,
 		})
+	}
+
+	return data, nil
+}
+
+// ParseV2VInspectionXML parses virt-v2v-inspector XML output
+// virt-v2v-inspector uses a simpler XML format than virt-inspector
+func ParseV2VInspectionXML(xmlData []byte) (*apitypes.InspectionData, error) {
+	// virt-v2v-inspector XML structure
+	type Mountpoint struct {
+		Device string `xml:"dev,attr"`
+		Path   string `xml:",chardata"`
+	}
+
+	type Mountpoints struct {
+		Mountpoints []Mountpoint `xml:"mountpoint"`
+	}
+
+	type InspectionOS struct {
+		Name              string      `xml:"name"`
+		Distro            string      `xml:"distro"`
+		Osinfo            string      `xml:"osinfo"`
+		Arch              string      `xml:"arch"`
+		MajorVersion      string      `xml:"major_version"`
+		MinorVersion      string      `xml:"minor_version"`
+		ProductName       string      `xml:"product_name"`
+		ProductVariant    string      `xml:"product_variant"`
+		Root              string      `xml:"root"`
+		PackageFormat     string      `xml:"package_format"`
+		PackageManagement string      `xml:"package_management"`
+		Mountpoints       Mountpoints `xml:"mountpoints"`
+	}
+
+	type InspectionV2V struct {
+		OS InspectionOS `xml:"operatingsystem"`
+	}
+
+	var xmlRoot InspectionV2V
+	err := xml.Unmarshal(xmlData, &xmlRoot)
+	if err != nil {
+		return nil, fmt.Errorf("XML parsing error: %w", err)
+	}
+
+	// Construct version string from major.minor
+	version := xmlRoot.OS.MajorVersion
+	if xmlRoot.OS.MinorVersion != "" && xmlRoot.OS.MinorVersion != "0" {
+		version = xmlRoot.OS.MajorVersion + "." + xmlRoot.OS.MinorVersion
+	}
+	// Fallback: extract version from osinfo if major_version is empty
+	if version == "" && xmlRoot.OS.Osinfo != "" {
+		// Try to extract version from osinfo (e.g., "rhel8" -> "8", "centos7" -> "7")
+		for i := len(xmlRoot.OS.Osinfo) - 1; i >= 0; i-- {
+			if xmlRoot.OS.Osinfo[i] >= '0' && xmlRoot.OS.Osinfo[i] <= '9' {
+				version = string(xmlRoot.OS.Osinfo[i])
+				if i > 0 && xmlRoot.OS.Osinfo[i-1] >= '0' && xmlRoot.OS.Osinfo[i-1] <= '9' {
+					version = string(xmlRoot.OS.Osinfo[i-1]) + version
+				}
+				break
+			}
+		}
+	}
+
+	// Convert mountpoints
+	mountpoints := make([]apitypes.Mountpoint, 0, len(xmlRoot.OS.Mountpoints.Mountpoints))
+	for _, mp := range xmlRoot.OS.Mountpoints.Mountpoints {
+		mountpoints = append(mountpoints, apitypes.Mountpoint{
+			Device:     mp.Device,
+			MountPoint: mp.Path,
+		})
+	}
+
+	data := &apitypes.InspectionData{
+		OperatingSystem: &apitypes.OSInfo{
+			Name:              xmlRoot.OS.Name,
+			Distro:            xmlRoot.OS.Distro,
+			Version:           version,
+			Architecture:      xmlRoot.OS.Arch,
+			OSInfo:            xmlRoot.OS.Osinfo,
+			Product:           xmlRoot.OS.ProductName,
+			Root:              xmlRoot.OS.Root,
+			PackageFormat:     xmlRoot.OS.PackageFormat,
+			PackageManagement: xmlRoot.OS.PackageManagement,
+			// virt-v2v-inspector doesn't provide these fields
+			Hostname: "",
+		},
+		// virt-v2v-inspector doesn't provide detailed application/filesystem info
+		Applications: make([]apitypes.Application, 0),
+		Filesystems:  make([]apitypes.Filesystem, 0),
+		Mountpoints:  mountpoints,
+		Drives:       make([]apitypes.Drive, 0),
 	}
 
 	return data, nil

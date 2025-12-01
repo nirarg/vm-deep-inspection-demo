@@ -134,21 +134,20 @@ func (i *VirtInspector) Inspect(
 	virtInspectorCmd := exec.CommandContext(inspectCtx, "sh", "-c", cmdString)
 
 	output, err := virtInspectorCmd.CombinedOutput()
+	outputStr := string(output)
 	if err != nil {
 		// Get exit code if available
 		exitCode := -1
 		if exitError, ok := err.(*exec.ExitError); ok {
 			exitCode = exitError.ExitCode()
 		}
-		
-		outputStr := string(output)
 		i.logger.WithFields(logrus.Fields{
 			"output":    outputStr,
 			"exit_code": exitCode,
 			"nbd_url":   nbdURL,
 			"command":   cmdString,
 		}).Error("virt-inspector failed")
-		
+
 		// Include output in error message for better debugging
 		if outputStr != "" {
 			return nil, fmt.Errorf("virt-inspector failed (exit code %d): %w\nOutput: %s", exitCode, err, outputStr)
@@ -158,6 +157,12 @@ func (i *VirtInspector) Inspect(
 
 	inspectionData, err := ParseInspectionXML(output)
 	if err != nil {
+		if i.logger != nil {
+			i.logger.WithFields(logrus.Fields{
+				"error":  err,
+				"output": outputStr,
+			}).Error("Failed to parse virt-inspector XML output")
+		}
 		return nil, fmt.Errorf("failed to parse inspection output: %w", err)
 	}
 

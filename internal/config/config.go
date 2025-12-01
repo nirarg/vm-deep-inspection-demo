@@ -72,7 +72,7 @@ func DefaultConfig() *Config {
 			Port:         8080,
 			Host:         "0.0.0.0",
 			ReadTimeout:  30 * time.Second,
-			WriteTimeout: 60 * time.Second,
+			WriteTimeout: 35 * time.Minute, // Increased to accommodate long-running inspections (30 min timeout + buffer)
 			IdleTimeout:  120 * time.Second,
 			EnableCORS:   true,
 			TLSConfig: TLSConfig{

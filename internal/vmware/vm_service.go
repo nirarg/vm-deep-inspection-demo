@@ -696,7 +696,7 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 
 	var vmMo mo.VirtualMachine
 	pc := property.DefaultCollector(client.Client)
-	err = pc.RetrieveOne(ctx, vm.Reference(), []string{"snapshot", "config.hardware.device"}, &vmMo)
+	err = pc.RetrieveOne(ctx, vm.Reference(), []string{"snapshot", "config.hardware.device", "runtime.host"}, &vmMo)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get VM properties: %w", err)
 	}
@@ -716,11 +716,26 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	snapshotMoref := snapshotRef.Snapshot.Value
 
 	// Get disk path from first virtual disk
+	// Use ParentFile (backing.Parent.FileName) if available
+	// This is the base/parent disk file that the snapshot was created from
 	var diskPath string
+	var baseDiskPath string
+	
 	for _, device := range vmMo.Config.Hardware.Device {
 		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
 			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
 				diskPath = backing.FileName
+				
+				// Check if backing has a Parent
+				// Parent points to the base disk file that the snapshot was created from
+				if backing.Parent != nil && backing.Parent.FileName != "" {
+					baseDiskPath = backing.Parent.FileName
+					s.logger.WithField("parent_file", baseDiskPath).Debug("Found parent file from disk backing")
+				} else {
+					// Fallback: calculate base disk path (remove delta disk suffix like -000002)
+					baseDiskPath = s.getBaseDiskPath(diskPath)
+					s.logger.WithField("calculated_base", baseDiskPath).Debug("Calculated base disk path (no parent in backing)")
+				}
 				break
 			}
 		}
@@ -729,22 +744,61 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	if diskPath == "" {
 		return nil, fmt.Errorf("no disk found for VM '%s'", vmName)
 	}
+	
+	if baseDiskPath == "" {
+		return nil, fmt.Errorf("no base disk path found for VM '%s'", vmName)
+	}
 
-	// Calculate base disk path (remove delta disk suffix like -000002)
-	baseDiskPath := s.getBaseDiskPath(diskPath)
+	// Get compute resource path (host/cluster) for vpx:// URL
+	var computeResourcePath string
+	if vmMo.Runtime.Host != nil {
+		finder := find.NewFinder(client.Client, true)
+		host, err := finder.ObjectReference(ctx, *vmMo.Runtime.Host)
+		if err == nil {
+			if hostObj, ok := host.(*object.HostSystem); ok {
+				// Get the host's inventory path
+				computeResourcePath = hostObj.InventoryPath
+				s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from host")
+			}
+		}
+		// If we couldn't get the host path, try to get it from the host's parent (cluster)
+		if computeResourcePath == "" && vmMo.Runtime.Host != nil {
+			// Try to get cluster path by finding the host's parent
+			var hostMo mo.HostSystem
+			err = pc.RetrieveOne(ctx, *vmMo.Runtime.Host, []string{"parent"}, &hostMo)
+			if err == nil && hostMo.Parent != nil {
+				parentObj, err := finder.ObjectReference(ctx, *hostMo.Parent)
+				if err == nil {
+					if clusterObj, ok := parentObj.(*object.ClusterComputeResource); ok {
+						computeResourcePath = clusterObj.InventoryPath
+						s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from cluster")
+					} else if computeResourceObj, ok := parentObj.(*object.ComputeResource); ok {
+						computeResourcePath = computeResourceObj.InventoryPath
+						s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from compute resource")
+					}
+				}
+			}
+		}
+	}
+
+	if computeResourcePath == "" {
+		return nil, fmt.Errorf("failed to get compute resource path for VM '%s'", vmName)
+	}
 
 	s.logger.WithFields(logrus.Fields{
-		"vm_moref":       vmMoref,
-		"snapshot_moref": snapshotMoref,
-		"disk_path":      diskPath,
-		"base_disk_path": baseDiskPath,
+		"vm_moref":            vmMoref,
+		"snapshot_moref":       snapshotMoref,
+		"disk_path":            diskPath,
+		"base_disk_path":       baseDiskPath,
+		"compute_resource_path": computeResourcePath,
 	}).Debug("Got snapshot disk info")
 
 	return &types.SnapshotDiskInfo{
-		VMMoref:       vmMoref,
-		SnapshotMoref: snapshotMoref,
-		DiskPath:      diskPath,
-		BaseDiskPath:  baseDiskPath,
+		VMMoref:            vmMoref,
+		SnapshotMoref:      snapshotMoref,
+		DiskPath:           diskPath,
+		BaseDiskPath:       baseDiskPath,
+		ComputeResourcePath: computeResourcePath,
 	}, nil
 }
 

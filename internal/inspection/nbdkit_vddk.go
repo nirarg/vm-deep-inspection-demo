@@ -134,25 +134,9 @@ func OpenWithNBDKitVDDK(
 	// Start nbdkit with VDDK plugin
 	cmd := exec.CommandContext(ctx, "nbdkit", nbdkitArgs...)
 	
-	// Preserve environment but ensure VDDK libraries are accessible
+	// Preserve environment - the nbdkit wrapper (created in Dockerfile) will set LD_LIBRARY_PATH
+	// for VDDK libraries, so we don't need to set it here
 	cmd.Env = os.Environ()
-	
-	// Add VDDK library path if it exists in common locations
-	vddkPaths := []string{
-		"/opt/vmware-vix-disklib/lib64",
-		"/usr/lib64",
-	}
-	
-	// Check if LD_LIBRARY_PATH is already set, if not, set it
-	ldLibraryPath := os.Getenv("LD_LIBRARY_PATH")
-	if ldLibraryPath == "" {
-		for _, path := range vddkPaths {
-			if _, err := os.Stat(path); err == nil {
-				cmd.Env = append(cmd.Env, fmt.Sprintf("LD_LIBRARY_PATH=%s", path))
-				break
-			}
-		}
-	}
 
 	// Capture both stdout and stderr to check for errors
 	stdoutBuf := &bytes.Buffer{}

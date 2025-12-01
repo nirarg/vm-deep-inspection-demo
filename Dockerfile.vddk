@@ -51,17 +51,6 @@ COPY --from=go-builder /app/vm-inspector ./vm-inspector
 RUN chown appuser:appuser /app/vm-inspector && \
     chmod +x /app/vm-inspector
 
-# ---------- FIX START ----------
-# Create wrappers for tools that need VDDK libraries
-# virt-v2v wrapper
-RUN if [ -f /usr/bin/virt-v2v ]; then \
-    mv /usr/bin/virt-v2v /usr/bin/virt-v2v.real && \
-    printf '#!/bin/bash\n\
-export LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64\n\
-exec /usr/bin/virt-v2v.real "$@"\n' > /usr/bin/virt-v2v && \
-    chmod +x /usr/bin/virt-v2v; \
-    fi
-
 # nbdkit wrapper (for VDDK plugin)
 # Find nbdkit binary location from installed package
 RUN NBDKIT_PATH=$(rpm -ql nbdkit 2>/dev/null | grep -E '^/usr/bin/nbdkit$|^/usr/sbin/nbdkit$' | head -1) && \
