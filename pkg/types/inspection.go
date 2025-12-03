@@ -1,5 +1,9 @@
 package types
 
+import (
+	validationtypes "github.com/nirarg/v2v-vm-validations/pkg/types"
+)
+
 // VMInspectionRequest represents a request to inspect a VM snapshot
 type VMInspectionRequest struct {
 	SnapshotName string `json:"snapshot_name" binding:"required" example:"backup-snapshot"`
@@ -22,66 +26,35 @@ type CloneResponse struct {
 
 // VMInspectionResponse represents the response from VM inspection
 type VMInspectionResponse struct {
-	VMName       string          `json:"vm_name" example:"web-server-01"`
-	SnapshotName string          `json:"snapshot_name" example:"backup-snapshot"`
-	Status       string          `json:"status" example:"completed"`
-	Message      string          `json:"message" example:"Inspection completed successfully"`
-	Data         *InspectionData `json:"data,omitempty"`
+	VMName         string      `json:"vm_name" example:"web-server-01"`
+	SnapshotName   string      `json:"snapshot_name" example:"backup-snapshot"`
+	Status         string      `json:"status" example:"completed"`
+	Message        string      `json:"message" example:"Inspection completed successfully"`
+	InspectorType  string      `json:"inspector_type" example:"virt-inspector"`
+	VirtInspector  interface{} `json:"virt_inspector,omitempty"`
+	VirtV2V        interface{} `json:"virt_v2v,omitempty"`
 }
 
-// InspectionData contains the parsed inspection results
-type InspectionData struct {
-	OperatingSystem *OSInfo          `json:"operating_system,omitempty"`
-	Applications    []Application    `json:"applications,omitempty"`
-	Filesystems     []Filesystem     `json:"filesystems,omitempty"`
-	Mountpoints     []Mountpoint     `json:"mountpoints,omitempty"`
-	Drives          []Drive          `json:"drives,omitempty"`
+// NewVirtInspectorResponse creates a response with virt-inspector data
+func NewVirtInspectorResponse(vmName, snapshotName, message string, data *validationtypes.VirtInspectorXML) VMInspectionResponse {
+	return VMInspectionResponse{
+		VMName:        vmName,
+		SnapshotName:  snapshotName,
+		Status:        "completed",
+		Message:       message,
+		InspectorType: "virt-inspector",
+		VirtInspector: data,
+	}
 }
 
-// OSInfo contains operating system information
-type OSInfo struct {
-	Name              string `json:"name" example:"linux"`
-	Distro            string `json:"distro" example:"ubuntu"`
-	Version           string `json:"version" example:"22.04"`
-	Architecture      string `json:"architecture" example:"x86_64"`
-	Hostname          string `json:"hostname,omitempty" example:"web-server-01"`
-	Product           string `json:"product,omitempty" example:"Ubuntu 22.04 LTS"`
-	Root              string `json:"root,omitempty" example:"/dev/sda1"`
-	PackageFormat     string `json:"package_format,omitempty" example:"rpm"`
-	PackageManagement string `json:"package_management,omitempty" example:"dnf"`
-	OSInfo            string `json:"osinfo,omitempty" example:"centos9"`
-}
-
-// Application represents an installed application/package
-type Application struct {
-	Name        string `json:"name" example:"nginx"`
-	Version     string `json:"version,omitempty" example:"1.18.0"`
-	Epoch       int    `json:"epoch,omitempty"`
-	Release     string `json:"release,omitempty"`
-	Arch        string `json:"arch,omitempty" example:"amd64"`
-	URL         string `json:"url,omitempty" example:"https://nginx.org"`
-	Summary     string `json:"summary,omitempty" example:"High performance web server"`
-	Description string `json:"description,omitempty" example:"nginx is a web server with a strong focus on high concurrency"`
-}
-
-// Filesystem represents a filesystem on the VM
-type Filesystem struct {
-	Device string `json:"device" example:"/dev/sda1"`
-	Type   string `json:"type" example:"ext4"`
-	UUID   string `json:"uuid,omitempty" example:"ac818163-71e7-4b23-a1b7-e94196b9dada"`
-	Size   int64  `json:"size,omitempty"`
-	Used   int64  `json:"used,omitempty"`
-}
-
-// Drive represents a drive/disk on the VM
-type Drive struct {
-	Name string `json:"name" example:"/dev/sda"`
-	Size int64  `json:"size,omitempty"`
-	Type string `json:"type,omitempty" example:"disk"`
-}
-
-// Mountpoint represents a mounted filesystem
-type Mountpoint struct {
-	Device     string `json:"device" example:"/dev/sda1"`
-	MountPoint string `json:"mount_point" example:"/boot"`
+// NewVirtV2VInspectorResponse creates a response with virt-v2v-inspector data
+func NewVirtV2VInspectorResponse(vmName, snapshotName, message string, data *validationtypes.VirtV2VInspectorXML) VMInspectionResponse {
+	return VMInspectionResponse{
+		VMName:        vmName,
+		SnapshotName:  snapshotName,
+		Status:        "completed",
+		Message:       message,
+		InspectorType: "virt-v2v-inspector",
+		VirtV2V:       data,
+	}
 }

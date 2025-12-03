@@ -7,10 +7,13 @@ RUN apk add --no-cache ca-certificates git
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
+# Copy the v2v-vm-validations library (required by replace directive in go.mod)
+COPY v2v-vm-validations /v2v-vm-validations
+
+COPY vm-deep-inspection-demo/go.mod vm-deep-inspection-demo/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY vm-deep-inspection-demo/ .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o vm-inspector ./cmd/server
 

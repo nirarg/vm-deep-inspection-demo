@@ -55,7 +55,7 @@ deps:
 
 docker-build:
 	@echo "Building container image (VDDK is mounted at runtime) using $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) .
+	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) ..
 	@echo "Container image built: $(LOCAL_IMAGE_NAME)"
 
 docker-run:
