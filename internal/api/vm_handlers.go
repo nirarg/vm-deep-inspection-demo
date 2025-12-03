@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/nirarg/vm-deep-inspection-demo/internal/inspection"
+	"github.com/nirarg/v2v-vm-validations/pkg/inspection"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -465,12 +465,13 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	}
 
 	// Use the selected inspector to inspect snapshot
-	var inspectionData *types.InspectionData
+	var response types.VMInspectionResponse
+	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
 
 	if inspectorType == "virt-v2v-inspector" {
 		inspector := inspection.NewVirtV2vInspector("", 30*time.Minute, h.logger)
 		h.logger.Info("Running virt-v2v-inspector with VDDK on snapshot")
-		inspectionData, err = inspector.Inspect(
+		inspectionData, err := inspector.Inspect(
 			c.Request.Context(),
 			vmName,
 			snapshotName,
@@ -481,11 +482,21 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 			diskInfo,
 			sslVerify,
 		)
+		if err != nil {
+			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+				Error:   "Inspection failed",
+				Code:    "INSPECTION_FAILED",
+				Details: err.Error(),
+			})
+			return
+		}
+		response = types.NewVirtV2VInspectorResponse(vmName, snapshotName, message, inspectionData)
 	} else {
 		// Default: use virt-inspector
 		inspector := inspection.NewVirtInspector("", 30*time.Minute, h.logger)
 		h.logger.Info("Running virt-inspector with VDDK on snapshot")
-		inspectionData, err = inspector.Inspect(
+		inspectionData, err := inspector.Inspect(
 			c.Request.Context(),
 			vmName,
 			snapshotName,
@@ -495,26 +506,16 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 			password,
 			diskInfo,
 		)
-	}
-
-	if err != nil {
-		h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
-
-	// Build response message based on inspector type
-	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
-	response := types.VMInspectionResponse{
-		VMName:       vmName,
-		SnapshotName: snapshotName,
-		Status:       "completed",
-		Message:      message,
-		Data:         inspectionData,
+		if err != nil {
+			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
+			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+				Error:   "Inspection failed",
+				Code:    "INSPECTION_FAILED",
+				Details: err.Error(),
+			})
+			return
+		}
+		response = types.NewVirtInspectorResponse(vmName, snapshotName, message, inspectionData)
 	}
 
 	h.logger.WithField("inspector_type", inspectorType).Info("Snapshot inspection completed successfully")
