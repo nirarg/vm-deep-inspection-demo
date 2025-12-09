@@ -28,8 +28,8 @@ server:
   port: 8080
 
   # HTTP timeouts
-  read_timeout: "10s"
-  write_timeout: "10s"
+  read_timeout: "60s"
+  write_timeout: "5m"  # Long timeout for VM inspections (30 min + buffer)
   idle_timeout: "60s"
 
   # Enable CORS (Cross-Origin Resource Sharing)
@@ -54,3 +54,33 @@ logging:
 
   # File logging path (when output is "file")
   file_path: "/var/log/vm-deep-inspection.log"
+
+# Database configuration for persistent inspection cache
+database:
+  # Database type: sqlite, postgres, mysql
+  type: "sqlite"
+
+  # SQLite configuration (default - embedded database)
+  # For SQLite, only 'name' field is used (file path)
+  name: "./data/vm_inspections.db"
+
+  # PostgreSQL configuration (to use PostgreSQL, change type to "postgres" and uncomment below)
+  # First run: make deploy-db
+  # host: "localhost"
+  # port: 5432
+  # name: "vm_inspections"
+  # user: "vmuser"
+  # password: "vmpass"
+  # ssl_mode: "disable"
+
+  # MySQL configuration (to use MySQL, change type to "mysql" and uncomment below)
+  # host: "localhost"
+  # port: 3306
+  # name: "vm_inspections"
+  # user: "vmuser"
+  # password: "vmpass"
+
+# Storage configuration
+storage:
+  # Base path for file storage (required even when using database)
+  base_path: "./data/inspections"

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/nirarg/v2v-vm-validations/pkg/inspection"
+	"github.com/nirarg/v2v-vm-validations/pkg/persistent"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -14,16 +14,18 @@ import (
 
 // VMHandler handles VM-related API requests
 type VMHandler struct {
-	vmService *vmware.VMService
-	vmClient  *vmware.Client
-	logger    *logrus.Logger
+	vmService  *vmware.VMService
+	vmClient   *vmware.Client
+	inspector  *persistent.Inspector
+	logger     *logrus.Logger
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
 		vmService: vmService,
 		vmClient:  vmClient,
+		inspector: inspector,
 		logger:    logger,
 	}
 }
@@ -431,11 +433,6 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Get vCenter credentials from config
-	vcenterURL := h.vmClient.GetConfig().VCenterURL
-	username := h.vmClient.GetConfig().Username
-	password := h.vmClient.GetConfig().Password
-	
 	// SSL verification option for vpx:// URL
 	// Using no_verify=1 for now to simplify (can be enhanced later with certificate support)
 	sslVerify := "no_verify=1"
@@ -469,16 +466,12 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
 
 	if inspectorType == "virt-v2v-inspector" {
-		inspector := inspection.NewVirtV2vInspector("", 30*time.Minute, h.logger)
 		h.logger.Info("Running virt-v2v-inspector with VDDK on snapshot")
-		inspectionData, err := inspector.Inspect(
+		inspectionData, err := h.inspector.InspectWithVirtV2v(
 			c.Request.Context(),
 			vmName,
 			snapshotName,
-			vcenterURL,
 			datacenter,
-			username,
-			password,
 			diskInfo,
 			sslVerify,
 		)
@@ -494,16 +487,12 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		response = types.NewVirtV2VInspectorResponse(vmName, snapshotName, message, inspectionData)
 	} else {
 		// Default: use virt-inspector
-		inspector := inspection.NewVirtInspector("", 30*time.Minute, h.logger)
 		h.logger.Info("Running virt-inspector with VDDK on snapshot")
-		inspectionData, err := inspector.Inspect(
+		inspectionData, err := h.inspector.InspectWithVirt(
 			c.Request.Context(),
 			vmName,
 			snapshotName,
-			vcenterURL,
 			datacenter,
-			username,
-			password,
 			diskInfo,
 		)
 		if err != nil {

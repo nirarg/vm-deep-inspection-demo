@@ -1,9 +1,10 @@
 # ============================================================
 # Builder stage – builds Go binary only
 # ============================================================
-FROM golang:1.24-alpine AS go-builder
+FROM golang:1.24 AS go-builder
 
-RUN apk add --no-cache ca-certificates git
+# Install build dependencies for CGO (required for SQLite)
+RUN apt-get update && apt-get install -y gcc libc6-dev ca-certificates git && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -15,7 +16,8 @@ RUN go mod download
 
 COPY vm-deep-inspection-demo/ .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o vm-inspector ./cmd/server
+# Build with CGO enabled (required for SQLite)
+RUN CGO_ENABLED=1 GOOS=linux go build -a -o vm-inspector ./cmd/server
 
 # ============================================================
 # Runtime stage – RHEL-compatible (CentOS Stream 9)
@@ -32,6 +34,7 @@ RUN dnf install -y --allowerasing \
     nbdkit-vddk-plugin \
     curl \
     ca-certificates \
+    sqlite-libs \
     && dnf clean all \
     && echo "Verifying nbdkit installation..." \
     && (nbdkit --version || echo "WARNING: nbdkit command not found in PATH") \
@@ -44,7 +47,7 @@ ENV LD_LIBRARY_PATH=""
 # Create an unprivileged user
 RUN useradd -m -u 1001 -s /bin/bash appuser
 
-RUN mkdir -p /var/tmp/guestfs /tmp/nbdkit /app && \
+RUN mkdir -p /var/tmp/guestfs /tmp/nbdkit /app/data && \
     chown -R appuser:appuser /var/tmp/guestfs /tmp/nbdkit /app
 
 WORKDIR /app

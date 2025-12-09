@@ -11,12 +11,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nirarg/v2v-vm-validations/pkg/persistent"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
+	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/sirupsen/logrus"
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 
 	_ "github.com/nirarg/vm-deep-inspection-demo/docs"
 )
@@ -67,8 +73,40 @@ func main() {
 	// Initialize VMware services
 	vmService := vmware.NewVMService(vmwareClient, log)
 
+	// Initialize database connection
+	db, err := initDatabase(cfg.Database, log)
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	log.WithFields(logrus.Fields{
+		"type": cfg.Database.Type,
+		"name": cfg.Database.Name,
+	}).Info("Database initialized")
+
+	// Initialize inspection database
+	inspectionDB, err := storage.NewInspectionDB(db, log)
+	if err != nil {
+		log.Fatalf("Failed to initialize inspection database: %v", err)
+	}
+	log.Info("Inspection database schema migrated")
+
+	// Initialize persistent inspector with credentials and DB
+	credentials := persistent.Credentials{
+		VCenterURL: cfg.VMware.VCenterURL,
+		Username:   cfg.VMware.Username,
+		Password:   cfg.VMware.Password,
+	}
+	inspector := persistent.NewInspector(
+		"",    // virt-inspector path (uses system PATH)
+		"",    // virt-v2v-inspector path (uses system PATH)
+		30*time.Minute, // timeout
+		credentials,
+		log,
+		inspectionDB, // Use file-based DB persistence
+	)
+
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, log)
 
 	// Setup router
 	router := gin.Default()
@@ -147,6 +185,16 @@ func main() {
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Close database connection
+	sqlDB, err := db.DB()
+	if err == nil {
+		if err := sqlDB.Close(); err != nil {
+			log.WithError(err).Warn("Error closing database connection")
+		} else {
+			log.Info("Database connection closed")
+		}
 	}
 
 	// Disconnect from vCenter
@@ -262,4 +310,47 @@ func healthCheck(log *logrus.Logger) gin.HandlerFunc {
 			"version":   "1.0.0",
 		})
 	}
+}
+
+// initDatabase initializes and returns a GORM database connection
+func initDatabase(cfg config.DatabaseConfig, log *logrus.Logger) (*gorm.DB, error) {
+	var dialector gorm.Dialector
+
+	dsn := cfg.GetDSN()
+	if dsn == "" {
+		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
+	}
+
+	// Select the appropriate GORM driver based on database type
+	switch cfg.Type {
+	case "sqlite":
+		dialector = sqlite.Open(dsn)
+	case "postgres":
+		dialector = postgres.Open(dsn)
+	case "mysql":
+		dialector = mysql.Open(dsn)
+	default:
+		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
+	}
+
+	// Open database connection
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: nil, // Use GORM's default logger, can be customized later
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %w", err)
+	}
+
+	// Get underlying sql.DB to configure connection pool
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get underlying database: %w", err)
+	}
+
+	// Set connection pool settings
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(100)
+	sqlDB.SetConnMaxLifetime(time.Hour)
+
+	return db, nil
 }

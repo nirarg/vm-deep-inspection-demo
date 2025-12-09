@@ -21,7 +21,7 @@ MAIN_PATH=./cmd/server
 LDFLAGS=-ldflags "-s -w"
 BUILD_FLAGS=-trimpath
 
-.PHONY: all build clean deps docker-build docker-run docker-stop docker-logs docker-shell docker-test-virt docker-test-vddk swagger help run run-config
+.PHONY: all build clean deps docker-build docker-run docker-stop docker-logs docker-shell docker-test-virt docker-test-vddk swagger help run run-config deploy-db kill-db
 
 all: deps build
 
@@ -68,6 +68,7 @@ docker-run:
 		-v /opt/vmware-vix-disklib:/opt/vmware-vix-disklib:ro \
 		-e LIBGUESTFS_BACKEND=direct \
 		-e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64 \
+		--network host \
 		--privileged \
 		--device /dev/kvm:/dev/kvm \
 		--name vm-inspector \
@@ -134,6 +135,39 @@ swagger:
 ## Install swag tool
 install-swag:
 	go install github.com/swaggo/swag/cmd/swag@latest
+
+# =============================================================================
+# Database Deployment Targets (PostgreSQL)
+# =============================================================================
+
+## Deploy PostgreSQL database
+deploy-db:
+	@echo "🚀 Deploying PostgreSQL database..."
+	@$(CONTAINER_RUNTIME) rm -f vm-inspector-db 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) volume rm vm-inspector-db 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) volume create vm-inspector-db
+	$(CONTAINER_RUNTIME) run -d \
+		--name vm-inspector-db \
+		-p 5432:5432 \
+		-e POSTGRESQL_DATABASE=vm_inspections \
+		-e POSTGRESQL_USER=vmuser \
+		-e POSTGRESQL_PASSWORD=vmpass \
+		-e POSTGRESQL_MASTER_USER=admin \
+		-e POSTGRESQL_MASTER_PASSWORD=adminpass \
+		-e PGPASSWORD=adminpass \
+		-v vm-inspector-db:/var/lib/pgsql/data \
+		--restart unless-stopped \
+		quay.io/sclorg/postgresql-15-c9s:latest
+	@echo "✅ PostgreSQL database deployed successfully."
+	@echo "Connection: postgresql://vmuser:vmpass@localhost:5432/vm_inspections"
+
+## Stop and remove PostgreSQL database
+kill-db:
+	@echo "🗑️ Removing PostgreSQL database..."
+	@$(CONTAINER_RUNTIME) stop vm-inspector-db 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) rm vm-inspector-db 2>/dev/null || true
+	@$(CONTAINER_RUNTIME) volume rm vm-inspector-db 2>/dev/null || true
+	@echo "✅ PostgreSQL database removed successfully."
 
 ## Show help
 help:

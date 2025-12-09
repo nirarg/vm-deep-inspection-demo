@@ -12,9 +12,11 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	VMware  VMwareConfig  `mapstructure:"vmware" validate:"required"`
-	Server  ServerConfig  `mapstructure:"server" validate:"required"`
-	Logging LoggingConfig `mapstructure:"logging" validate:"required"`
+	VMware   VMwareConfig   `mapstructure:"vmware" validate:"required"`
+	Server   ServerConfig   `mapstructure:"server" validate:"required"`
+	Logging  LoggingConfig  `mapstructure:"logging" validate:"required"`
+	Database DatabaseConfig `mapstructure:"database" validate:"required"`
+	Storage  StorageConfig  `mapstructure:"storage" validate:"required"`
 }
 
 // VMwareConfig contains vSphere connection configuration
@@ -55,6 +57,22 @@ type LoggingConfig struct {
 	FilePath string `mapstructure:"file_path" example:"/var/log/vm-deep-inspection.log"`
 }
 
+// DatabaseConfig contains database configuration
+type DatabaseConfig struct {
+	Type     string `mapstructure:"type" validate:"required,oneof=sqlite postgres mysql" example:"sqlite"`
+	Host     string `mapstructure:"host" example:"localhost"`
+	Port     int    `mapstructure:"port" validate:"min=0,max=65535" example:"5432"`
+	Name     string `mapstructure:"name" validate:"required" example:"vm_inspections"`
+	User     string `mapstructure:"user" example:"postgres"`
+	Password string `mapstructure:"password" example:"secret"`
+	SSLMode  string `mapstructure:"ssl_mode" example:"disable"`
+}
+
+// StorageConfig contains inspection data storage configuration
+type StorageConfig struct {
+	BasePath string `mapstructure:"base_path" validate:"required" example:"./data/inspections"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -83,6 +101,14 @@ func DefaultConfig() *Config {
 			Level:  "info",
 			Format: "json",
 			Output: "stdout",
+		},
+		Database: DatabaseConfig{
+			Type:    "sqlite",
+			Name:    "./data/vm_inspections.db",
+			SSLMode: "disable",
+		},
+		Storage: StorageConfig{
+			BasePath: "./data/inspections",
 		},
 	}
 }
@@ -162,6 +188,14 @@ func ValidateConfig(config *Config) error {
 		return fmt.Errorf("logging config validation failed: %w", err)
 	}
 
+	if err := validateDatabaseConfig(&config.Database); err != nil {
+		return fmt.Errorf("database config validation failed: %w", err)
+	}
+
+	if err := validateStorageConfig(&config.Storage); err != nil {
+		return fmt.Errorf("storage config validation failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -221,6 +255,41 @@ func validateLoggingConfig(config *LoggingConfig) error {
 	return nil
 }
 
+// validateDatabaseConfig performs additional validation for database configuration
+func validateDatabaseConfig(config *DatabaseConfig) error {
+	if config.Type == "" {
+		return fmt.Errorf("database type is required")
+	}
+
+	if config.Name == "" {
+		return fmt.Errorf("database name is required")
+	}
+
+	// For non-sqlite databases, additional fields are required
+	if config.Type != "sqlite" {
+		if config.Host == "" {
+			return fmt.Errorf("database host is required for %s", config.Type)
+		}
+		if config.User == "" {
+			return fmt.Errorf("database user is required for %s", config.Type)
+		}
+		if config.Port == 0 {
+			return fmt.Errorf("database port is required for %s", config.Type)
+		}
+	}
+
+	return nil
+}
+
+// validateStorageConfig performs additional validation for storage configuration
+func validateStorageConfig(config *StorageConfig) error {
+	if config.BasePath == "" {
+		return fmt.Errorf("base_path is required")
+	}
+
+	return nil
+}
+
 // GetAddress returns the server address in host:port format
 func (c *ServerConfig) GetAddress() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
@@ -229,4 +298,20 @@ func (c *ServerConfig) GetAddress() string {
 // IsTLSEnabled returns true if TLS is enabled
 func (c *ServerConfig) IsTLSEnabled() bool {
 	return c.TLSConfig.Enabled
+}
+
+// GetDSN returns the database DSN (Data Source Name) for GORM
+func (c *DatabaseConfig) GetDSN() string {
+	switch c.Type {
+	case "sqlite":
+		return c.Name
+	case "postgres":
+		return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+			c.Host, c.Port, c.User, c.Password, c.Name, c.SSLMode)
+	case "mysql":
+		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8mb4&parseTime=True&loc=Local",
+			c.User, c.Password, c.Host, c.Port, c.Name)
+	default:
+		return ""
+	}
 }
