@@ -51,7 +51,6 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	c.logger.WithFields(logrus.Fields{
 		"vcenter_url": c.config.VCenterURL,
-		"username":    c.config.Username,
 	}).Info("Connecting to vCenter")
 
 	// Create context with timeout for connection
@@ -224,4 +223,18 @@ func (c *Client) GetConfig() config.VMwareConfig {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 	return c.config
+}
+
+// GetVCenterURL returns the vCenter URL
+func (c *Client) GetVCenterURL() string {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return c.config.VCenterURL
+}
+
+// GetCredentials returns the vCenter username and password
+func (c *Client) GetCredentials() (string, string) {
+	c.mutex.RLock()
+	defer c.mutex.RUnlock()
+	return c.config.Username, c.config.Password
 }

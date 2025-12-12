@@ -23,6 +23,7 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 
 	_ "github.com/nirarg/vm-deep-inspection-demo/docs"
 )
@@ -136,6 +137,9 @@ func main() {
 
 		// Snapshot inspection route (direct inspection without clone)
 		v1.POST("/vms/inspect-snapshot", vmHandler.InspectSnapshot)
+
+		// Validation checks route (generic check runner)
+		v1.POST("/vms/check", vmHandler.RunCheck)
 	}
 
 	// Swagger documentation endpoint
@@ -333,9 +337,12 @@ func initDatabase(cfg config.DatabaseConfig, log *logrus.Logger) (*gorm.DB, erro
 		return nil, fmt.Errorf("unsupported database type: %s", cfg.Type)
 	}
 
+	// Configure GORM logger to only log errors (suppress "record not found" messages)
+	gormLogger := logger.Default.LogMode(logger.Error)
+
 	// Open database connection
 	db, err := gorm.Open(dialector, &gorm.Config{
-		Logger: nil, // Use GORM's default logger, can be customized later
+		Logger: gormLogger, // Only log errors, not info messages
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)

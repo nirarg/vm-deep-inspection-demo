@@ -58,3 +58,18 @@ func NewVirtV2VInspectorResponse(vmName, snapshotName, message string, data *val
 		VirtV2V:       data,
 	}
 }
+
+// CheckResult represents the result of a single validation check
+type CheckResult struct {
+	CheckType string `json:"check_type" example:"fstab"`
+	Valid     bool   `json:"valid" example:"true"`
+	Message   string `json:"message" example:"Fstab is migrateable - no /dev/disk/by-path/ entries found"`
+}
+
+// CheckResponse represents the response from running validation checks
+type CheckResponse struct {
+	VMName       string        `json:"vm_name" example:"web-server-01"`
+	SnapshotName string        `json:"snapshot_name" example:"backup-snapshot"`
+	Results      []CheckResult `json:"results"`
+	AllValid     bool          `json:"all_valid" example:"true"`
+}
