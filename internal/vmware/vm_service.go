@@ -182,10 +182,13 @@ func NewVMService(client *Client, logger *logrus.Logger) *VMService {
 
 // getDefaultDatacenter is a helper to get the default datacenter
 func (s *VMService) getDefaultDatacenter(ctx context.Context, finder *find.Finder) (*object.Datacenter, error) {
+	s.logger.Debug("Attempting to get default datacenter")
 	datacenter, err := finder.DefaultDatacenter(ctx)
 	if err != nil {
+		s.logger.WithError(err).Error("Failed to get default datacenter - this may indicate authentication or permission issues")
 		return nil, fmt.Errorf("no default datacenter found: %w", err)
 	}
+	s.logger.WithField("datacenter", datacenter.Name()).Info("Found default datacenter")
 	finder.SetDatacenter(datacenter)
 	return datacenter, nil
 }
@@ -201,11 +204,15 @@ func (s *VMService) GetDatacenterName(ctx context.Context, vmName string) (strin
 
 // findVMByName is a helper to find a VM by name
 func (s *VMService) findVMByName(ctx context.Context, name string) (*object.VirtualMachine, *object.Datacenter, error) {
+	s.logger.WithField("vm_name", name).Debug("Finding VM by name")
+
 	// Get govmomi client
 	client, err := s.client.GetClient(ctx)
 	if err != nil {
+		s.logger.WithError(err).Error("Failed to get vSphere client")
 		return nil, nil, fmt.Errorf("failed to get vSphere client: %w", err)
 	}
+	s.logger.Debug("Successfully obtained vSphere client")
 
 	// Create finder
 	finder := find.NewFinder(client.Client, true)
@@ -217,10 +224,13 @@ func (s *VMService) findVMByName(ctx context.Context, name string) (*object.Virt
 	}
 
 	// Find VM by name
+	s.logger.WithField("vm_name", name).Debug("Searching for VM in datacenter")
 	vm, err := finder.VirtualMachine(ctx, name)
 	if err != nil {
+		s.logger.WithError(err).WithField("vm_name", name).Error("VM not found")
 		return nil, nil, fmt.Errorf("VM with name '%s' not found: %w", name, err)
 	}
+	s.logger.WithField("vm_name", name).Info("Successfully found VM")
 
 	return vm, datacenter, nil
 }
@@ -715,67 +725,82 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	// Get snapshot moref
 	snapshotMoref := snapshotRef.Snapshot.Value
 
-	// Get disk path from first virtual disk
+	// Get disk paths from ALL virtual disks (not just the first one)
 	// Use ParentFile (backing.Parent.FileName) if available
 	// This is the base/parent disk file that the snapshot was created from
-	var diskPath string
-	var baseDiskPath string
-	
+	var diskPaths []string
+	var baseDiskPaths []string
+
 	for _, device := range vmMo.Config.Hardware.Device {
 		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
 			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
-				diskPath = backing.FileName
-				
+				diskPath := backing.FileName
+				diskPaths = append(diskPaths, diskPath)
+
 				// Check if backing has a Parent
 				// Parent points to the base disk file that the snapshot was created from
+				var baseDiskPath string
 				if backing.Parent != nil && backing.Parent.FileName != "" {
 					baseDiskPath = backing.Parent.FileName
-					s.logger.WithField("parent_file", baseDiskPath).Debug("Found parent file from disk backing")
+					s.logger.WithFields(logrus.Fields{
+						"disk_path":   diskPath,
+						"parent_file": baseDiskPath,
+					}).Debug("Found parent file from disk backing")
 				} else {
 					// Fallback: calculate base disk path (remove delta disk suffix like -000002)
 					baseDiskPath = s.getBaseDiskPath(diskPath)
-					s.logger.WithField("calculated_base", baseDiskPath).Debug("Calculated base disk path (no parent in backing)")
+					s.logger.WithFields(logrus.Fields{
+						"disk_path":      diskPath,
+						"calculated_base": baseDiskPath,
+					}).Debug("Calculated base disk path (no parent in backing)")
 				}
-				break
+				baseDiskPaths = append(baseDiskPaths, baseDiskPath)
 			}
 		}
 	}
 
-	if diskPath == "" {
-		return nil, fmt.Errorf("no disk found for VM '%s'", vmName)
+	if len(diskPaths) == 0 {
+		return nil, fmt.Errorf("no disks found for VM '%s'", vmName)
 	}
-	
-	if baseDiskPath == "" {
-		return nil, fmt.Errorf("no base disk path found for VM '%s'", vmName)
+
+	if len(baseDiskPaths) == 0 {
+		return nil, fmt.Errorf("no base disk paths found for VM '%s'", vmName)
 	}
 
 	// Get compute resource path (host/cluster) for vpx:// URL
+	// For libvirt vpx:// URLs, we need the path to the ComputeResource or ClusterComputeResource,
+	// not the individual host. For a standalone host, this is the parent ComputeResource.
+	// For a clustered host, this is the parent ClusterComputeResource.
 	var computeResourcePath string
 	if vmMo.Runtime.Host != nil {
 		finder := find.NewFinder(client.Client, true)
-		host, err := finder.ObjectReference(ctx, *vmMo.Runtime.Host)
-		if err == nil {
-			if hostObj, ok := host.(*object.HostSystem); ok {
-				// Get the host's inventory path
-				computeResourcePath = hostObj.InventoryPath
-				s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from host")
+
+		// FIRST: Try to get the parent compute resource (preferred for vpx:// URLs)
+		var hostMo mo.HostSystem
+		err = pc.RetrieveOne(ctx, *vmMo.Runtime.Host, []string{"parent"}, &hostMo)
+		if err == nil && hostMo.Parent != nil {
+			parentObj, err := finder.ObjectReference(ctx, *hostMo.Parent)
+			if err == nil {
+				if clusterObj, ok := parentObj.(*object.ClusterComputeResource); ok {
+					// Host is in a cluster - use cluster path
+					computeResourcePath = clusterObj.InventoryPath
+					s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from cluster")
+				} else if computeResourceObj, ok := parentObj.(*object.ComputeResource); ok {
+					// Standalone host - use its parent ComputeResource path
+					computeResourcePath = computeResourceObj.InventoryPath
+					s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from compute resource")
+				}
 			}
 		}
-		// If we couldn't get the host path, try to get it from the host's parent (cluster)
-		if computeResourcePath == "" && vmMo.Runtime.Host != nil {
-			// Try to get cluster path by finding the host's parent
-			var hostMo mo.HostSystem
-			err = pc.RetrieveOne(ctx, *vmMo.Runtime.Host, []string{"parent"}, &hostMo)
-			if err == nil && hostMo.Parent != nil {
-				parentObj, err := finder.ObjectReference(ctx, *hostMo.Parent)
-				if err == nil {
-					if clusterObj, ok := parentObj.(*object.ClusterComputeResource); ok {
-						computeResourcePath = clusterObj.InventoryPath
-						s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from cluster")
-					} else if computeResourceObj, ok := parentObj.(*object.ComputeResource); ok {
-						computeResourcePath = computeResourceObj.InventoryPath
-						s.logger.WithField("compute_resource_path", computeResourcePath).Debug("Got compute resource path from compute resource")
-					}
+
+		// FALLBACK: If we couldn't get parent, use the host's inventory path
+		// (this may include the host itself and cause issues with some vpx:// URL parsers)
+		if computeResourcePath == "" {
+			host, err := finder.ObjectReference(ctx, *vmMo.Runtime.Host)
+			if err == nil {
+				if hostObj, ok := host.(*object.HostSystem); ok {
+					computeResourcePath = hostObj.InventoryPath
+					s.logger.WithField("compute_resource_path", computeResourcePath).Warn("Using host inventory path as fallback (may need trimming)")
 				}
 			}
 		}
@@ -786,18 +811,19 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"vm_moref":            vmMoref,
+		"vm_moref":             vmMoref,
 		"snapshot_moref":       snapshotMoref,
-		"disk_path":            diskPath,
-		"base_disk_path":       baseDiskPath,
+		"disk_paths":           diskPaths,
+		"base_disk_paths":      baseDiskPaths,
+		"disk_count":           len(diskPaths),
 		"compute_resource_path": computeResourcePath,
 	}).Debug("Got snapshot disk info")
 
 	return &types.SnapshotDiskInfo{
-		VMMoref:            vmMoref,
-		SnapshotMoref:      snapshotMoref,
-		DiskPath:           diskPath,
-		BaseDiskPath:       baseDiskPath,
+		VMMoref:             vmMoref,
+		SnapshotMoref:       snapshotMoref,
+		DiskPaths:           diskPaths,
+		BaseDiskPaths:       baseDiskPaths,
 		ComputeResourcePath: computeResourcePath,
 	}, nil
 }

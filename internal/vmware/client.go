@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/url"
+	"os"
 	"sync"
 	"time"
 
@@ -80,19 +81,39 @@ func (c *Client) Connect(ctx context.Context) error {
 		SessionManager: session.NewManager(vimClient),
 	}
 
-	// Create session cache for session persistence
+	// Create session WITHOUT disk caching to avoid stale sessions
+	// Setting an environment variable to disable cache file
+	os.Setenv("GOVMOMI_SESSION_CACHE_DISABLE", "true")
+
 	c.session = &cache.Session{
 		URL:      vcenterURL,
 		Insecure: c.config.InsecureSkipVerify,
+		DirSOAP:  "", // Empty = no cache file on disk
 	}
 
 	// Login with retry logic
 	if err := c.loginWithRetry(connectCtx); err != nil {
+		c.logger.WithFields(logrus.Fields{
+			"vcenter_url": c.config.VCenterURL,
+			"error":       err,
+		}).Error("Failed to login to vCenter after retries")
 		return fmt.Errorf("failed to login to vCenter: %w", err)
 	}
 
+	// Verify the session is active by getting user session
+	sessionMgr := session.NewManager(c.client.Client)
+	userSession, err := sessionMgr.UserSession(connectCtx)
+	if err != nil {
+		c.logger.WithError(err).Error("Failed to verify user session after login")
+		return fmt.Errorf("failed to verify session: %w", err)
+	}
+
 	c.isLoggedIn = true
-	c.logger.Info("Successfully connected to vCenter")
+	c.logger.WithFields(logrus.Fields{
+		"user":     userSession.UserName,
+		"session":  userSession.Key,
+		"login_at": userSession.LoginTime,
+	}).Info("Successfully connected and authenticated to vCenter")
 	return nil
 }
 
@@ -114,7 +135,7 @@ func (c *Client) loginWithRetry(ctx context.Context) error {
 			}
 		}
 
-		// Attempt login
+		// Attempt login - cache.Session.Login will NOT use disk cache since DirSOAP is empty
 		err := c.session.Login(ctx, c.client.Client, nil)
 		if err == nil {
 			c.logger.WithField("attempt", attempt+1).Info("Login successful")
@@ -171,12 +192,31 @@ func (c *Client) GetClient(ctx context.Context) (*govmomi.Client, error) {
 	if c.client != nil && c.isLoggedIn {
 		client := c.client
 		c.mutex.RUnlock()
+
+		// Verify the session is still valid by doing a quick health check
+		sessionMgr := session.NewManager(client.Client)
+		if _, err := sessionMgr.UserSession(ctx); err != nil {
+			c.logger.WithError(err).Warn("Session validation failed, reconnecting")
+			c.mutex.RUnlock()
+
+			// Session is invalid, reconnect
+			if err := c.Reconnect(ctx); err != nil {
+				return nil, fmt.Errorf("failed to reconnect after session validation failure: %w", err)
+			}
+
+			c.mutex.RLock()
+			defer c.mutex.RUnlock()
+			return c.client, nil
+		}
+
 		return client, nil
 	}
 	c.mutex.RUnlock()
 
 	// If not connected, attempt to connect
+	c.logger.Info("Client not connected, attempting to connect")
 	if err := c.Connect(ctx); err != nil {
+		c.logger.WithError(err).Error("Failed to establish connection")
 		return nil, fmt.Errorf("failed to establish connection: %w", err)
 	}
 
