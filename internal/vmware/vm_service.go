@@ -715,38 +715,46 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	// Get snapshot moref
 	snapshotMoref := snapshotRef.Snapshot.Value
 
-	// Get disk path from first virtual disk
+	// Get disk paths from ALL virtual disks (not just the first one)
 	// Use ParentFile (backing.Parent.FileName) if available
 	// This is the base/parent disk file that the snapshot was created from
-	var diskPath string
-	var baseDiskPath string
-	
+	var diskPaths []string
+	var baseDiskPaths []string
+
 	for _, device := range vmMo.Config.Hardware.Device {
 		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
 			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
-				diskPath = backing.FileName
-				
+				diskPath := backing.FileName
+				diskPaths = append(diskPaths, diskPath)
+
 				// Check if backing has a Parent
 				// Parent points to the base disk file that the snapshot was created from
+				var baseDiskPath string
 				if backing.Parent != nil && backing.Parent.FileName != "" {
 					baseDiskPath = backing.Parent.FileName
-					s.logger.WithField("parent_file", baseDiskPath).Debug("Found parent file from disk backing")
+					s.logger.WithFields(logrus.Fields{
+						"disk_path":   diskPath,
+						"parent_file": baseDiskPath,
+					}).Debug("Found parent file from disk backing")
 				} else {
 					// Fallback: calculate base disk path (remove delta disk suffix like -000002)
 					baseDiskPath = s.getBaseDiskPath(diskPath)
-					s.logger.WithField("calculated_base", baseDiskPath).Debug("Calculated base disk path (no parent in backing)")
+					s.logger.WithFields(logrus.Fields{
+						"disk_path":      diskPath,
+						"calculated_base": baseDiskPath,
+					}).Debug("Calculated base disk path (no parent in backing)")
 				}
-				break
+				baseDiskPaths = append(baseDiskPaths, baseDiskPath)
 			}
 		}
 	}
 
-	if diskPath == "" {
-		return nil, fmt.Errorf("no disk found for VM '%s'", vmName)
+	if len(diskPaths) == 0 {
+		return nil, fmt.Errorf("no disks found for VM '%s'", vmName)
 	}
-	
-	if baseDiskPath == "" {
-		return nil, fmt.Errorf("no base disk path found for VM '%s'", vmName)
+
+	if len(baseDiskPaths) == 0 {
+		return nil, fmt.Errorf("no base disk paths found for VM '%s'", vmName)
 	}
 
 	// Get compute resource path (host/cluster) for vpx:// URL
@@ -786,18 +794,19 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"vm_moref":            vmMoref,
+		"vm_moref":             vmMoref,
 		"snapshot_moref":       snapshotMoref,
-		"disk_path":            diskPath,
-		"base_disk_path":       baseDiskPath,
+		"disk_count":           len(diskPaths),
+		"disk_paths":           diskPaths,
+		"base_disk_paths":      baseDiskPaths,
 		"compute_resource_path": computeResourcePath,
 	}).Debug("Got snapshot disk info")
 
 	return &types.SnapshotDiskInfo{
-		VMMoref:            vmMoref,
-		SnapshotMoref:      snapshotMoref,
-		DiskPath:           diskPath,
-		BaseDiskPath:       baseDiskPath,
+		VMMoref:             vmMoref,
+		SnapshotMoref:       snapshotMoref,
+		DiskPaths:           diskPaths,
+		BaseDiskPaths:       baseDiskPaths,
 		ComputeResourcePath: computeResourcePath,
 	}, nil
 }
