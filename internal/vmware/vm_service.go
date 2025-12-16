@@ -182,10 +182,13 @@ func NewVMService(client *Client, logger *logrus.Logger) *VMService {
 
 // getDefaultDatacenter is a helper to get the default datacenter
 func (s *VMService) getDefaultDatacenter(ctx context.Context, finder *find.Finder) (*object.Datacenter, error) {
+	s.logger.Debug("Attempting to get default datacenter")
 	datacenter, err := finder.DefaultDatacenter(ctx)
 	if err != nil {
+		s.logger.WithError(err).Error("Failed to get default datacenter - this may indicate authentication or permission issues")
 		return nil, fmt.Errorf("no default datacenter found: %w", err)
 	}
+	s.logger.WithField("datacenter", datacenter.Name()).Info("Found default datacenter")
 	finder.SetDatacenter(datacenter)
 	return datacenter, nil
 }
@@ -201,11 +204,15 @@ func (s *VMService) GetDatacenterName(ctx context.Context, vmName string) (strin
 
 // findVMByName is a helper to find a VM by name
 func (s *VMService) findVMByName(ctx context.Context, name string) (*object.VirtualMachine, *object.Datacenter, error) {
+	s.logger.WithField("vm_name", name).Debug("Finding VM by name")
+
 	// Get govmomi client
 	client, err := s.client.GetClient(ctx)
 	if err != nil {
+		s.logger.WithError(err).Error("Failed to get vSphere client")
 		return nil, nil, fmt.Errorf("failed to get vSphere client: %w", err)
 	}
+	s.logger.Debug("Successfully obtained vSphere client")
 
 	// Create finder
 	finder := find.NewFinder(client.Client, true)
@@ -217,10 +224,13 @@ func (s *VMService) findVMByName(ctx context.Context, name string) (*object.Virt
 	}
 
 	// Find VM by name
+	s.logger.WithField("vm_name", name).Debug("Searching for VM in datacenter")
 	vm, err := finder.VirtualMachine(ctx, name)
 	if err != nil {
+		s.logger.WithError(err).WithField("vm_name", name).Error("VM not found")
 		return nil, nil, fmt.Errorf("VM with name '%s' not found: %w", name, err)
 	}
+	s.logger.WithField("vm_name", name).Info("Successfully found VM")
 
 	return vm, datacenter, nil
 }
@@ -422,8 +432,8 @@ func (s *VMService) ListVMs(ctx context.Context, filter VMFilter) (*VMListResult
 			return nil, fmt.Errorf("failed to list VMs in cluster '%s': %w", filter.Cluster, err)
 		}
 	} else {
-		// Find all VMs in datacenter
-		vms, err = finder.VirtualMachineList(ctx, "*")
+		// Find all VMs in datacenter (recursively through all folders)
+		vms, err = finder.VirtualMachineList(ctx, "...")
 		if err != nil {
 			return nil, fmt.Errorf("failed to list VMs: %w", err)
 		}
