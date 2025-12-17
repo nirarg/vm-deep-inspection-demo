@@ -2,12 +2,12 @@ module github.com/nirarg/vm-deep-inspection-demo
 
 go 1.24.0
 
-replace github.com/nirarg/v2v-vm-validations => ../v2v-vm-validations
+replace github.com/kubev2v/vm-migration-detective => ../vm-migration-detective
 
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/go-playground/validator/v10 v10.27.0
-	github.com/nirarg/v2v-vm-validations v0.0.0-20251202232818-503d3660a998
+	github.com/kubev2v/vm-migration-detective v0.0.0-20251202232818-503d3660a998
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/viper v1.21.0
 	github.com/swaggo/files v1.0.1

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nirarg/v2v-vm-validations/pkg/types"
+	"github.com/kubev2v/vm-migration-detective/pkg/types"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"

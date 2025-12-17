@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/nirarg/v2v-vm-validations/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"

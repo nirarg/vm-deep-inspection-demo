@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/nirarg/v2v-vm-validations/pkg/checks"
-	"github.com/nirarg/v2v-vm-validations/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/checks"
+	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"

@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/nirarg/v2v-vm-validations/pkg/persistent"
-	pkgtypes "github.com/nirarg/v2v-vm-validations/pkg/types"
+	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	pkgtypes "github.com/kubev2v/vm-migration-detective/pkg/types"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )

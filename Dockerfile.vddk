@@ -8,8 +8,8 @@ RUN apt-get update && apt-get install -y gcc libc6-dev ca-certificates git && rm
 
 WORKDIR /app
 
-# Copy the v2v-vm-validations library (required by replace directive in go.mod)
-COPY v2v-vm-validations /v2v-vm-validations
+# Copy the vm-migration-detective library (required by replace directive in go.mod)
+COPY vm-migration-detective /vm-migration-detective
 
 COPY vm-deep-inspection-demo/go.mod vm-deep-inspection-demo/go.sum ./
 RUN go mod download

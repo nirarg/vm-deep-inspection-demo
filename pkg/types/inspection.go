@@ -1,7 +1,7 @@
 package types
 
 import (
-	validationtypes "github.com/nirarg/v2v-vm-validations/pkg/types"
+	validationtypes "github.com/kubev2v/vm-migration-detective/pkg/types"
 )
 
 // VMInspectionRequest represents a request to inspect a VM snapshot
