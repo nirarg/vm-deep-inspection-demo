@@ -26,13 +26,13 @@ type CloneResponse struct {
 
 // VMInspectionResponse represents the response from VM inspection
 type VMInspectionResponse struct {
-	VMName         string      `json:"vm_name" example:"web-server-01"`
-	SnapshotName   string      `json:"snapshot_name" example:"backup-snapshot"`
-	Status         string      `json:"status" example:"completed"`
-	Message        string      `json:"message" example:"Inspection completed successfully"`
-	InspectorType  string      `json:"inspector_type" example:"virt-inspector"`
-	VirtInspector  interface{} `json:"virt_inspector,omitempty"`
-	VirtV2V        interface{} `json:"virt_v2v,omitempty"`
+	VMName        string      `json:"vm_name" example:"web-server-01"`
+	SnapshotName  string      `json:"snapshot_name" example:"backup-snapshot"`
+	Status        string      `json:"status" example:"completed"`
+	Message       string      `json:"message" example:"Inspection completed successfully"`
+	InspectorType string      `json:"inspector_type" example:"virt-inspector"`
+	VirtInspector interface{} `json:"virt_inspector,omitempty"`
+	VirtV2V       interface{} `json:"virt_v2v,omitempty"`
 }
 
 // NewVirtInspectorResponse creates a response with virt-inspector data
@@ -61,9 +61,10 @@ func NewVirtV2VInspectorResponse(vmName, snapshotName, message string, data *val
 
 // CheckResult represents the result of a single validation check
 type CheckResult struct {
-	CheckType string `json:"check_type" example:"fstab"`
-	Valid     bool   `json:"valid" example:"true"`
-	Message   string `json:"message" example:"Fstab is migrateable - no /dev/disk/by-path/ entries found"`
+	CheckType string  `json:"check_type" example:"fstab"`
+	Valid     bool    `json:"valid" example:"true"`
+	Message   string  `json:"message" example:"Fstab is migrateable - no /dev/disk/by-path/ entries found"`
+	Error     *string `json:"error,omitempty" example:"Failed to run inspection: connection timeout"`
 }
 
 // CheckResponse represents the response from running validation checks

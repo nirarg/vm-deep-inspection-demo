@@ -15,10 +15,10 @@ import (
 
 // VMHandler handles VM-related API requests
 type VMHandler struct {
-	vmService  *vmware.VMService
-	vmClient   *vmware.Client
-	inspector  *persistent.Inspector
-	logger     *logrus.Logger
+	vmService *vmware.VMService
+	vmClient  *vmware.Client
+	inspector *persistent.Inspector
+	logger    *logrus.Logger
 }
 
 // NewVMHandler creates a new VM handler instance
@@ -678,33 +678,33 @@ func isConnectionError(err error) bool {
 	// Check for common connection-related errors
 	errStr := err.Error()
 	return contains(errStr, "connection") ||
-		   contains(errStr, "timeout") ||
-		   contains(errStr, "network") ||
-		   contains(errStr, "dial")
+		contains(errStr, "timeout") ||
+		contains(errStr, "network") ||
+		contains(errStr, "dial")
 }
 
 func isAuthenticationError(err error) bool {
 	// Check for authentication-related errors
 	errStr := err.Error()
 	return contains(errStr, "authentication") ||
-		   contains(errStr, "login") ||
-		   contains(errStr, "unauthorized") ||
-		   contains(errStr, "permission")
+		contains(errStr, "login") ||
+		contains(errStr, "unauthorized") ||
+		contains(errStr, "permission")
 }
 
 func isNotFoundError(err error) bool {
 	// Check for not found errors
 	errStr := err.Error()
 	return contains(errStr, "not found") ||
-		   contains(errStr, "does not exist")
+		contains(errStr, "does not exist")
 }
 
 // contains checks if a string contains a substring (case-insensitive)
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) &&
-		   (s == substr ||
+		(s == substr ||
 			len(s) > len(substr) &&
-			(hasSubstring(s, substr)))
+				(hasSubstring(s, substr)))
 }
 
 func hasSubstring(s, substr string) bool {
@@ -738,7 +738,7 @@ func toLower(b byte) byte {
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param check query string false "Check type to run (fstab). If omitted, runs all checks." example("fstab")
+// @Param check query string false "Check type to run (fstab, disk-access). If omitted, runs all checks." example("fstab")
 // @Success 200 {object} types.CheckResponse "Check completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
@@ -823,7 +823,8 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 
 	// Define all available checks
 	allChecks := map[string]checks.Check{
-		"fstab": checks.NewFstabCheck(),
+		"fstab":       checks.NewFstabCheck(),
+		"disk-access": checks.NewDiskAccessCheck(),
 	}
 
 	// Determine which checks to run
@@ -835,7 +836,7 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, types.ErrorResponse{
 				Error:   "Unknown check type",
 				Code:    "UNKNOWN_CHECK_TYPE",
-				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab", checkType),
+				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", checkType),
 			})
 			return
 		}
@@ -857,6 +858,7 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 			CheckType: name,
 			Valid:     result.Valid,
 			Message:   result.Message,
+			Error:     result.Error,
 		})
 
 		if !result.Valid {
