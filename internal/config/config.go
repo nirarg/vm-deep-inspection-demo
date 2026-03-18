@@ -17,6 +17,7 @@ type Config struct {
 	Logging  LoggingConfig  `mapstructure:"logging" validate:"required"`
 	Database DatabaseConfig `mapstructure:"database" validate:"required"`
 	Storage  StorageConfig  `mapstructure:"storage" validate:"required"`
+	VDDK     VDDKConfig     `mapstructure:"vddk"`
 }
 
 // VMwareConfig contains vSphere connection configuration
@@ -73,6 +74,11 @@ type StorageConfig struct {
 	BasePath string `mapstructure:"base_path" validate:"required" example:"./data/inspections"`
 }
 
+// VDDKConfig contains VDDK library configuration
+type VDDKConfig struct {
+	LibDir string `mapstructure:"lib_dir" example:"/opt/vmware-vix-disklib"`
+}
+
 // DefaultConfig returns a configuration with sensible defaults
 func DefaultConfig() *Config {
 	return &Config{
@@ -109,6 +115,9 @@ func DefaultConfig() *Config {
 		},
 		Storage: StorageConfig{
 			BasePath: "./data/inspections",
+		},
+		VDDK: VDDKConfig{
+			LibDir: "", // If empty, will search in default locations
 		},
 	}
 }
@@ -194,6 +203,10 @@ func ValidateConfig(config *Config) error {
 
 	if err := validateStorageConfig(&config.Storage); err != nil {
 		return fmt.Errorf("storage config validation failed: %w", err)
+	}
+
+	if err := validateVDDKConfig(&config.VDDK); err != nil {
+		return fmt.Errorf("vddk config validation failed: %w", err)
 	}
 
 	return nil
@@ -285,6 +298,19 @@ func validateDatabaseConfig(config *DatabaseConfig) error {
 func validateStorageConfig(config *StorageConfig) error {
 	if config.BasePath == "" {
 		return fmt.Errorf("base_path is required")
+	}
+
+	return nil
+}
+
+// validateVDDKConfig performs additional validation for VDDK configuration
+func validateVDDKConfig(config *VDDKConfig) error {
+	// LibDir is optional - if empty, library will search in default locations
+	if config.LibDir != "" {
+		// Check if the specified directory exists
+		if _, err := os.Stat(config.LibDir); os.IsNotExist(err) {
+			return fmt.Errorf("vddk lib_dir does not exist: %s", config.LibDir)
+		}
 	}
 
 	return nil

@@ -98,16 +98,18 @@ func main() {
 		Password:   cfg.VMware.Password,
 	}
 	inspector := persistent.NewInspector(
-		"",    // virt-inspector path (uses system PATH)
-		"",    // virt-v2v-inspector path (uses system PATH)
-		30*time.Minute, // timeout
+		"",              // virt-inspector path (uses system PATH)
+		"",              // virt-v2v-inspector path (uses system PATH)
+		30*time.Minute,  // timeout
 		credentials,
 		log,
-		inspectionDB, // Use file-based DB persistence
+		inspectionDB,    // Use file-based DB persistence
+		cfg.VDDK.LibDir, // VDDK library directory (empty = auto-detect)
 	)
+	log.WithField("vddk_lib_dir", cfg.VDDK.LibDir).Info("Inspector initialized with VDDK configuration")
 
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, cfg.VDDK.LibDir, log)
 
 	// Setup router
 	router := gin.Default()

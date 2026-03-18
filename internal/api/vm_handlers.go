@@ -15,19 +15,21 @@ import (
 
 // VMHandler handles VM-related API requests
 type VMHandler struct {
-	vmService *vmware.VMService
-	vmClient  *vmware.Client
-	inspector *persistent.Inspector
-	logger    *logrus.Logger
+	vmService  *vmware.VMService
+	vmClient   *vmware.Client
+	inspector  *persistent.Inspector
+	logger     *logrus.Logger
+	vddkLibDir string
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, vddkLibDir string, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
-		vmService: vmService,
-		vmClient:  vmClient,
-		inspector: inspector,
-		logger:    logger,
+		vmService:  vmService,
+		vmClient:   vmClient,
+		inspector:  inspector,
+		vddkLibDir: vddkLibDir,
+		logger:     logger,
 	}
 }
 
@@ -819,6 +821,7 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 		DiskInfo:     diskInfo,
 		DB:           h.inspector.GetDB(),
 		Logger:       h.logger,
+		VDDKLibDir:   h.vddkLibDir,
 	}
 
 	// Define all available checks
