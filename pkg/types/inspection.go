@@ -74,3 +74,28 @@ type CheckResponse struct {
 	Results      []CheckResult `json:"results"`
 	AllValid     bool          `json:"all_valid" example:"true"`
 }
+
+// DetectConcern represents a concern found during detection checks (vmdetect API)
+type DetectConcern struct {
+	ID       string `json:"id" example:"fstab-by-path-device"`
+	Category string `json:"category" example:"Warning"`
+	Label    string `json:"label" example:"Fstab contains /dev/disk/by-path/ entry"`
+	Message  string `json:"message" example:"Fstab contains /dev/disk/by-path/ entries which are not migrateable"`
+}
+
+// DetectCheckResult represents the result of a single detection check
+type DetectCheckResult struct {
+	CheckType string          `json:"check_type" example:"fstab"`
+	Passed    bool            `json:"passed" example:"true"`
+	Concerns  []DetectConcern `json:"concerns,omitempty"`
+	Error     *string         `json:"error,omitempty"`
+}
+
+// DetectResponse represents the response from the vmdetect API
+type DetectResponse struct {
+	VMName       string              `json:"vm_name" example:"web-server-01"`
+	SnapshotName string              `json:"snapshot_name" example:"backup-snapshot"`
+	Results      []DetectCheckResult `json:"results"`
+	AllConcerns  []DetectConcern     `json:"all_concerns"`
+	Passed       bool                `json:"passed" example:"true"`
+}

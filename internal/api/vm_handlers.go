@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kubev2v/vm-migration-detective/pkg/checks"
 	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -15,21 +16,23 @@ import (
 
 // VMHandler handles VM-related API requests
 type VMHandler struct {
-	vmService  *vmware.VMService
-	vmClient   *vmware.Client
-	inspector  *persistent.Inspector
-	logger     *logrus.Logger
-	vddkLibDir string
+	vmService   *vmware.VMService
+	vmClient    *vmware.Client
+	inspector   *persistent.Inspector
+	checkRunner *vmdetect.CheckRunner
+	logger      *logrus.Logger
+	vddkLibDir  string
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, vddkLibDir string, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, checkRunner *vmdetect.CheckRunner, vddkLibDir string, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
-		vmService:  vmService,
-		vmClient:   vmClient,
-		inspector:  inspector,
-		vddkLibDir: vddkLibDir,
-		logger:     logger,
+		vmService:   vmService,
+		vmClient:    vmClient,
+		inspector:   inspector,
+		checkRunner: checkRunner,
+		vddkLibDir:  vddkLibDir,
+		logger:      logger,
 	}
 }
 
@@ -732,24 +735,25 @@ func toLower(b byte) byte {
 	return b
 }
 
-// RunCheck godoc
-// @Summary Run validation checks on a VM snapshot
-// @Description Run validation checks on a VM snapshot. If check parameter is provided, runs that specific check. If omitted, runs all available checks.
+
+// RunDetect godoc
+// @Summary Run VM detection checks using vmdetect API
+// @Description Run detection checks on a VM snapshot using the new vmdetect library API. Returns structured concerns with severity levels.
 // @Tags vms
 // @Accept json
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param check query string false "Check type to run (fstab, disk-access). If omitted, runs all checks." example("fstab")
-// @Success 200 {object} types.CheckResponse "Check completed successfully"
+// @Param checks query []string false "Specific checks to run (fstab, disk-access). If omitted, runs all checks." collectionFormat(multi)
+// @Success 200 {object} types.DetectResponse "Detection completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
 // @Failure 500 {object} types.ErrorResponse "Internal server error"
-// @Router /api/v1/vms/check [post]
-func (h *VMHandler) RunCheck(c *gin.Context) {
+// @Router /api/v1/vms/detect [post]
+func (h *VMHandler) RunDetect(c *gin.Context) {
 	vmName := c.Query("vm")
 	snapshotName := c.Query("snapshot")
-	checkType := c.Query("check")
+	checkTypesParam := c.QueryArray("checks")
 
 	if vmName == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
@@ -769,122 +773,96 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 		return
 	}
 
-	logFields := logrus.Fields{
+	h.logger.WithFields(logrus.Fields{
 		"vm_name":       vmName,
 		"snapshot_name": snapshotName,
-	}
-	if checkType != "" {
-		logFields["check_type"] = checkType
-		h.logger.WithFields(logFields).Info("Running specific validation check on VM snapshot")
-	} else {
-		h.logger.WithFields(logFields).Info("Running all validation checks on VM snapshot")
-	}
+		"checks":        checkTypesParam,
+	}).Info("Running VM detection checks")
 
 	// Get datacenter name
 	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
 	if err != nil {
 		h.logger.WithError(err).Error("failed to get datacenter name")
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Check failed",
-			Code:    "CHECK_FAILED",
+			Error:   "Detection failed",
+			Code:    "DETECTION_FAILED",
 			Details: err.Error(),
 		})
 		return
 	}
 
-	// Get snapshot disk info
-	h.logger.Debug("Getting snapshot disk info from vm_service")
-	diskInfo, err := h.vmService.GetSnapshotDiskInfo(c.Request.Context(), vmName, snapshotName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get snapshot disk info")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Check failed",
-			Code:    "CHECK_FAILED",
-			Details: fmt.Sprintf("failed to get snapshot disk info: %v", err),
-		})
-		return
+	// Parse check types from query params
+	var checkTypes []vmdetect.CheckType
+	if len(checkTypesParam) > 0 {
+		for _, ct := range checkTypesParam {
+			checkType := vmdetect.CheckType(ct)
+			if !vmdetect.IsValidCheckType(checkType) {
+				c.JSON(http.StatusBadRequest, types.ErrorResponse{
+					Error:   "Invalid check type",
+					Code:    "INVALID_CHECK_TYPE",
+					Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", ct),
+				})
+				return
+			}
+			checkTypes = append(checkTypes, checkType)
+		}
 	}
 
-	// Get vCenter credentials from vmClient
-	vcenterURL := h.vmClient.GetVCenterURL()
-	username, password := h.vmClient.GetCredentials()
-
-	// Create inspection params
-	params := checks.InspectionParams{
+	// Run checks using vmdetect API
+	result, err := h.checkRunner.RunChecks(vmdetect.RunChecksParams{
 		Ctx:          c.Request.Context(),
 		VMName:       vmName,
 		SnapshotName: snapshotName,
 		Datacenter:   datacenter,
-		VCenterURL:   vcenterURL,
-		Username:     username,
-		Password:     password,
-		DiskInfo:     diskInfo,
-		DB:           h.inspector.GetDB(),
-		Logger:       h.logger,
-		VDDKLibDir:   h.vddkLibDir,
-	}
+	}, checkTypes...)
 
-	// Define all available checks
-	allChecks := map[string]checks.Check{
-		"fstab":       checks.NewFstabCheck(),
-		"disk-access": checks.NewDiskAccessCheck(),
-	}
-
-	// Determine which checks to run
-	var checksToRun map[string]checks.Check
-	if checkType != "" {
-		// Run specific check
-		check, exists := allChecks[checkType]
-		if !exists {
-			c.JSON(http.StatusBadRequest, types.ErrorResponse{
-				Error:   "Unknown check type",
-				Code:    "UNKNOWN_CHECK_TYPE",
-				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", checkType),
-			})
-			return
-		}
-		checksToRun = map[string]checks.Check{checkType: check}
-	} else {
-		// Run all checks
-		checksToRun = allChecks
-	}
-
-	// Execute all selected checks
-	var results []types.CheckResult
-	allValid := true
-
-	for name, check := range checksToRun {
-		h.logger.WithField("check_type", name).Info("Executing validation check")
-		result := check.Run(params)
-
-		results = append(results, types.CheckResult{
-			CheckType: name,
-			Valid:     result.Valid,
-			Message:   result.Message,
-			Error:     result.Error,
+	if err != nil {
+		h.logger.WithError(err).Error("detection checks failed")
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Error:   "Detection failed",
+			Code:    "DETECTION_FAILED",
+			Details: err.Error(),
 		})
-
-		if !result.Valid {
-			allValid = false
-		}
-
-		h.logger.WithFields(logrus.Fields{
-			"check_type": name,
-			"valid":      result.Valid,
-		}).Info("Validation check completed")
+		return
 	}
 
-	response := types.CheckResponse{
+	// Convert vmdetect result to API response
+	response := types.DetectResponse{
 		VMName:       vmName,
 		SnapshotName: snapshotName,
-		Results:      results,
-		AllValid:     allValid,
+		Results:      make([]types.DetectCheckResult, 0, len(result.Results)),
+		AllConcerns:  convertConcernsToDetectConcerns(result.AllConcerns),
+		Passed:       result.Passed,
+	}
+
+	for _, r := range result.Results {
+		response.Results = append(response.Results, types.DetectCheckResult{
+			CheckType: string(r.CheckType),
+			Passed:    r.Passed,
+			Concerns:  convertConcernsToDetectConcerns(r.Concerns),
+			Error:     r.Error,
+		})
 	}
 
 	h.logger.WithFields(logrus.Fields{
-		"checks_run": len(results),
-		"all_valid":  allValid,
-	}).Info("All validation checks completed")
+		"checks_run":    len(result.Results),
+		"passed":        result.Passed,
+		"total_concerns": len(result.AllConcerns),
+	}).Info("VM detection checks completed")
 
 	c.JSON(http.StatusOK, response)
+}
+
+// convertConcernsToDetectConcerns converts checks.Concern to types.DetectConcern
+func convertConcernsToDetectConcerns(concerns []checks.Concern) []types.DetectConcern {
+	result := make([]types.DetectConcern, len(concerns))
+	for i, c := range concerns {
+		result[i] = types.DetectConcern{
+			ID:       c.ID,
+			Category: string(c.Category),
+			Label:    c.Label,
+			Message:  c.Message,
+		}
+	}
+	return result
 }

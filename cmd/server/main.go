@@ -12,6 +12,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"
@@ -108,8 +109,20 @@ func main() {
 	)
 	log.WithField("vddk_lib_dir", cfg.VDDK.LibDir).Info("Inspector initialized with VDDK configuration")
 
+	// Initialize vmdetect CheckRunner
+	checkRunner, err := vmdetect.NewCheckRunner(vmdetect.CheckRunnerConfig{
+		Credentials: credentials,
+		VDDKLibDir:  cfg.VDDK.LibDir,
+		Logger:      log,
+		DB:          inspectionDB,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize CheckRunner: %v", err)
+	}
+	log.Info("CheckRunner initialized")
+
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, cfg.VDDK.LibDir, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, checkRunner, cfg.VDDK.LibDir, log)
 
 	// Setup router
 	router := gin.Default()
@@ -140,8 +153,8 @@ func main() {
 		// Snapshot inspection route (direct inspection without clone)
 		v1.POST("/vms/inspect-snapshot", vmHandler.InspectSnapshot)
 
-		// Validation checks route (generic check runner)
-		v1.POST("/vms/check", vmHandler.RunCheck)
+		// VM detection route (vmdetect API)
+		v1.POST("/vms/detect", vmHandler.RunDetect)
 	}
 
 	// Swagger documentation endpoint
