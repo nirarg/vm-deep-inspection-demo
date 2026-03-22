@@ -34,6 +34,7 @@ type VMFilter struct {
 
 // VMInfo represents basic information about a virtual machine
 type VMInfo struct {
+	Moref      string `json:"moref"`
 	UUID       string `json:"uuid"`
 	Name       string `json:"name"`
 	PowerState string `json:"power_state"`
@@ -62,12 +63,13 @@ type VMNetworkAdapterInfo struct {
 
 // VMSnapshotInfo represents snapshot information
 type VMSnapshotInfo struct {
+	Moref       string    `json:"moref"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreateTime  time.Time `json:"create_time"`
 	State       string    `json:"state"`
 	Quiesced    bool      `json:"quiesced"`
-	ID          int32     `json:"id"`
+	ID          int32     `json:"id"` // Legacy database ID, use Moref instead
 }
 
 // VMResourceAllocation represents resource allocation settings
@@ -85,6 +87,7 @@ type VMResourceAllocation struct {
 // VMDetailedInfo represents comprehensive information about a virtual machine
 type VMDetailedInfo struct {
 	// Basic Info
+	Moref             string   `json:"moref"`
 	UUID              string   `json:"uuid"`
 	Name              string   `json:"name"`
 	PowerState        string   `json:"power_state"`
@@ -489,6 +492,7 @@ func (s *VMService) ListVMs(ctx context.Context, filter VMFilter) (*VMListResult
 // convertToVMInfo converts a vSphere VM managed object to VMInfo
 func (s *VMService) convertToVMInfo(vm mo.VirtualMachine) *VMInfo {
 	return &VMInfo{
+		Moref:      vm.Reference().Value,
 		UUID:       vm.Config.Uuid,
 		Name:       vm.Name,
 		PowerState: string(vm.Runtime.PowerState),
@@ -498,6 +502,7 @@ func (s *VMService) convertToVMInfo(vm mo.VirtualMachine) *VMInfo {
 // convertToVMDetailedInfo converts a vSphere VM managed object to VMDetailedInfo
 func (s *VMService) convertToVMDetailedInfo(vm mo.VirtualMachine) *VMDetailedInfo {
 	info := &VMDetailedInfo{
+		Moref:      vm.Reference().Value,
 		UUID:       vm.Config.Uuid,
 		Name:       vm.Name,
 		PowerState: string(vm.Runtime.PowerState),
@@ -921,6 +926,7 @@ func (s *VMService) extractSnapshotInfo(snapshots []vimtypes.VirtualMachineSnaps
 	var result []VMSnapshotInfo
 	for _, snap := range snapshots {
 		info := VMSnapshotInfo{
+			Moref:       snap.Snapshot.Value,
 			Name:        snap.Name,
 			Description: snap.Description,
 			CreateTime:  snap.CreateTime,

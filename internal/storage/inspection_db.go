@@ -14,19 +14,19 @@ import (
 // VirtInspectorRecord represents a database record for VirtInspector inspection data
 type VirtInspectorRecord struct {
 	gorm.Model
-	VMName       string `gorm:"index:idx_vm_snapshot,unique"`
-	SnapshotName string `gorm:"index:idx_vm_snapshot,unique"`
-	CacheKey     string `gorm:"uniqueIndex"`
-	DataJSON     string `gorm:"type:longtext"` // MySQL: 4GB, PostgreSQL/SQLite: interpreted as TEXT
+	VMMoref       string `gorm:"index:idx_vm_snapshot,unique"`
+	SnapshotMoref string `gorm:"index:idx_vm_snapshot,unique"`
+	CacheKey      string `gorm:"uniqueIndex"`
+	DataJSON      string `gorm:"type:longtext"` // MySQL: 4GB, PostgreSQL/SQLite: interpreted as TEXT
 }
 
 // VirtV2VInspectorRecord represents a database record for VirtV2vInspector inspection data
 type VirtV2VInspectorRecord struct {
 	gorm.Model
-	VMName       string `gorm:"index:idx_vm_snapshot_v2v,unique"`
-	SnapshotName string `gorm:"index:idx_vm_snapshot_v2v,unique"`
-	CacheKey     string `gorm:"uniqueIndex"`
-	DataJSON     string `gorm:"type:longtext"` // MySQL: 4GB, PostgreSQL/SQLite: interpreted as TEXT
+	VMMoref       string `gorm:"index:idx_vm_snapshot_v2v,unique"`
+	SnapshotMoref string `gorm:"index:idx_vm_snapshot_v2v,unique"`
+	CacheKey      string `gorm:"uniqueIndex"`
+	DataJSON      string `gorm:"type:longtext"` // MySQL: 4GB, PostgreSQL/SQLite: interpreted as TEXT
 }
 
 // InspectionDB provides GORM-based persistent storage for inspection results
@@ -86,10 +86,10 @@ func (db *InspectionDB) SetVirtInspectorXML(ctx context.Context, key vmdetect.Ca
 	}
 
 	record := VirtInspectorRecord{
-		VMName:       key.VMName,
-		SnapshotName: key.SnapshotName,
-		CacheKey:     key.Hash(),
-		DataJSON:     string(jsonData),
+		VMMoref:       key.VMMoref,
+		SnapshotMoref: key.SnapshotMoref,
+		CacheKey:      key.Hash(),
+		DataJSON:      string(jsonData),
 	}
 
 	// Use Create or update if exists
@@ -146,10 +146,10 @@ func (db *InspectionDB) SetVirtV2VInspectorXML(ctx context.Context, key vmdetect
 	}
 
 	record := VirtV2VInspectorRecord{
-		VMName:       key.VMName,
-		SnapshotName: key.SnapshotName,
-		CacheKey:     key.Hash(),
-		DataJSON:     string(jsonData),
+		VMMoref:       key.VMMoref,
+		SnapshotMoref: key.SnapshotMoref,
+		CacheKey:      key.Hash(),
+		DataJSON:      string(jsonData),
 	}
 
 	// Use Create or update if exists

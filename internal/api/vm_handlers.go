@@ -156,6 +156,7 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 
 	// Convert detailed VM info to API response
 	vm := types.VM{
+		Moref:      result.VM.Moref,
 		UUID:       result.VM.UUID,
 		Name:       result.VM.Name,
 		PowerState: result.VM.PowerState,
@@ -192,12 +193,12 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 	var snapshots []types.VMSnapshot
 	for _, snap := range result.VM.Snapshots {
 		snapshots = append(snapshots, types.VMSnapshot{
+			Moref:       snap.Moref,
 			Name:        snap.Name,
 			Description: snap.Description,
 			CreateTime:  snap.CreateTime,
 			State:       snap.State,
 			Quiesced:    snap.Quiesced,
-			ID:          snap.ID,
 		})
 	}
 
@@ -534,6 +535,7 @@ func (h *VMHandler) CreateVMSnapshot(c *gin.Context) {
 // convertVMInfoToVM converts internal VMInfo to API VM type
 func (h *VMHandler) convertVMInfoToVM(vmInfo vmware.VMInfo) types.VM {
 	return types.VM{
+		Moref:      vmInfo.Moref,
 		UUID:       vmInfo.UUID,
 		Name:       vmInfo.Name,
 		PowerState: vmInfo.PowerState,
@@ -613,45 +615,33 @@ func toLower(b byte) byte {
 // @Failure 500 {object} types.ErrorResponse "Internal server error"
 // @Router /api/v1/vms/detect [post]
 func (h *VMHandler) RunDetect(c *gin.Context) {
-	vmName := c.Query("vm")
-	snapshotName := c.Query("snapshot")
+	vmMoref := c.Query("vm_moref")
+	snapshotMoref := c.Query("snapshot_moref")
 	checkTypesParam := c.QueryArray("checks")
 
-	if vmName == "" {
+	if vmMoref == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "VM name is required",
-			Code:    "MISSING_VM_NAME",
-			Details: "Please provide VM name as query parameter: ?vm=xxx",
+			Error:   "VM moref is required",
+			Code:    "MISSING_VM_MOREF",
+			Details: "Please provide VM moref as query parameter: ?vm_moref=vm-123",
 		})
 		return
 	}
 
-	if snapshotName == "" {
+	if snapshotMoref == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "Snapshot name is required",
-			Code:    "MISSING_SNAPSHOT_NAME",
-			Details: "Please provide snapshot name as query parameter: &snapshot=xxx",
+			Error:   "Snapshot moref is required",
+			Code:    "MISSING_SNAPSHOT_MOREF",
+			Details: "Please provide snapshot moref as query parameter: &snapshot_moref=snapshot-456",
 		})
 		return
 	}
 
 	h.logger.WithFields(logrus.Fields{
-		"vm_name":       vmName,
-		"snapshot_name": snapshotName,
-		"checks":        checkTypesParam,
+		"vm_moref":       vmMoref,
+		"snapshot_moref": snapshotMoref,
+		"checks":         checkTypesParam,
 	}).Info("Running VM detection checks")
-
-	// Get datacenter name
-	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get datacenter name")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Detection failed",
-			Code:    "DETECTION_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
 
 	// Parse check types from query params
 	var checkTypes []vmdetect.CheckType
@@ -672,10 +662,9 @@ func (h *VMHandler) RunDetect(c *gin.Context) {
 
 	// Run checks using vmdetect API
 	result, err := h.checkRunner.RunChecks(vmdetect.RunChecksParams{
-		Ctx:          c.Request.Context(),
-		VMName:       vmName,
-		SnapshotName: snapshotName,
-		Datacenter:   datacenter,
+		Ctx:           c.Request.Context(),
+		VMMoref:       vmMoref,
+		SnapshotMoref: snapshotMoref,
 	}, checkTypes...)
 
 	if err != nil {
@@ -690,8 +679,8 @@ func (h *VMHandler) RunDetect(c *gin.Context) {
 
 	// Convert vmdetect result to API response
 	response := types.DetectResponse{
-		VMName:       vmName,
-		SnapshotName: snapshotName,
+		VMName:       vmMoref, // Using VMMoref as VMName for now (can update response struct later)
+		SnapshotName: snapshotMoref,
 		Results:      make([]types.DetectCheckResult, 0, len(result.Results)),
 		AllConcerns:  convertConcernsToDetectConcerns(result.AllConcerns),
 		Passed:       result.Passed,
