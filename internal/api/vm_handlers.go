@@ -14,19 +14,19 @@ import (
 
 // VMHandler handles VM-related API requests
 type VMHandler struct {
-	vmService   *vmware.VMService
-	vmClient    *vmware.Client
-	checkRunner *vmdetect.CheckRunner
-	logger      *logrus.Logger
+	vmService *vmware.VMService
+	vmClient  *vmware.Client
+	detector  *vmdetect.Detector
+	logger    *logrus.Logger
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, checkRunner *vmdetect.CheckRunner, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, detector *vmdetect.Detector, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
-		vmService:   vmService,
-		vmClient:    vmClient,
-		checkRunner: checkRunner,
-		logger:      logger,
+		vmService: vmService,
+		vmClient:  vmClient,
+		detector:  detector,
+		logger:    logger,
 	}
 }
 
@@ -660,8 +660,8 @@ func (h *VMHandler) RunDetect(c *gin.Context) {
 		}
 	}
 
-	// Run checks using vmdetect API
-	result, err := h.checkRunner.RunChecks(vmdetect.RunChecksParams{
+	// Run detection using vmdetect API
+	result, err := h.detector.Detect(vmdetect.DetectParams{
 		Ctx:           c.Request.Context(),
 		VMMoref:       vmMoref,
 		SnapshotMoref: snapshotMoref,

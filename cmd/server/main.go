@@ -98,20 +98,20 @@ func main() {
 		Password:   cfg.VMware.Password,
 	}
 
-	// Initialize vmdetect CheckRunner
-	checkRunner, err := vmdetect.NewCheckRunner(vmdetect.CheckRunnerConfig{
+	// Initialize vmdetect Detector
+	detector, err := vmdetect.NewDetector(vmdetect.DetectorConfig{
 		Credentials: credentials,
 		VDDKLibDir:  cfg.VDDK.LibDir,
 		Logger:      log,
 		DB:          inspectionDB,
 	})
 	if err != nil {
-		log.Fatalf("Failed to initialize CheckRunner: %v", err)
+		log.Fatalf("Failed to initialize Detector: %v", err)
 	}
-	log.Info("CheckRunner initialized")
+	log.Info("Detector initialized")
 
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, checkRunner, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, detector, log)
 
 	// Setup router
 	router := gin.Default()
