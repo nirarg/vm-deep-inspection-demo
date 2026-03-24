@@ -684,6 +684,10 @@ func (h *VMHandler) RunDetect(c *gin.Context) {
 		Results:      make([]types.DetectCheckResult, 0, len(result.Results)),
 		AllConcerns:  convertConcernsToDetectConcerns(result.AllConcerns),
 		Passed:       result.Passed,
+		OSInfo:       result.OSInfo,
+		Applications: result.Applications,
+		Filesystems:  result.Filesystems,
+		Mountpoints:  result.Mountpoints,
 	}
 
 	for _, r := range result.Results {

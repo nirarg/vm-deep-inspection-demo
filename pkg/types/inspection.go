@@ -2,6 +2,7 @@ package types
 
 import (
 	validationtypes "github.com/kubev2v/vm-migration-detective/pkg/types"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 )
 
 // VMInspectionRequest represents a request to inspect a VM snapshot
@@ -93,9 +94,13 @@ type DetectCheckResult struct {
 
 // DetectResponse represents the response from the vmdetect API
 type DetectResponse struct {
-	VMName       string              `json:"vm_name" example:"web-server-01"`
-	SnapshotName string              `json:"snapshot_name" example:"backup-snapshot"`
-	Results      []DetectCheckResult `json:"results"`
-	AllConcerns  []DetectConcern     `json:"all_concerns"`
-	Passed       bool                `json:"passed" example:"true"`
+	VMName       string                         `json:"vm_name" example:"web-server-01"`
+	SnapshotName string                         `json:"snapshot_name" example:"backup-snapshot"`
+	Results      []DetectCheckResult            `json:"results"`
+	AllConcerns  []DetectConcern                `json:"all_concerns"`
+	Passed       bool                           `json:"passed" example:"true"`
+	OSInfo       *vmdetect.OSInfo               `json:"os_info,omitempty"`
+	Applications []validationtypes.Application  `json:"applications,omitempty"`
+	Filesystems  []validationtypes.Filesystem   `json:"filesystems,omitempty"`
+	Mountpoints  []validationtypes.Mountpoint   `json:"mountpoints,omitempty"`
 }
