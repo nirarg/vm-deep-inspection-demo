@@ -15,6 +15,7 @@ type VMListRequest struct {
 
 // VM represents a virtual machine with minimal information
 type VM struct {
+	Moref      string `json:"moref" example:"vm-123"`
 	UUID       string `json:"uuid" example:"502e7c6e-b5c3-4d0e-9a5a-8b9c1d2e3f4g"`
 	Name       string `json:"name" example:"web-server-01"`
 	PowerState string `json:"power_state" example:"poweredOn"`
@@ -115,12 +116,12 @@ type VMNetworkAdapter struct {
 
 // VMSnapshot represents snapshot information
 type VMSnapshot struct {
+	Moref       string    `json:"moref" example:"snapshot-456"`
 	Name        string    `json:"name" example:"snapshot-1"`
 	Description string    `json:"description" example:"Before upgrade"`
 	CreateTime  time.Time `json:"create_time" example:"2024-01-15T14:30:00Z"`
 	State       string    `json:"state" example:"poweredOff"`
 	Quiesced    bool      `json:"quiesced" example:"true"`
-	ID          int32     `json:"id" example:"1"`
 }
 
 // VMResourceInfo represents resource allocation information

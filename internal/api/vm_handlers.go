@@ -6,8 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kubev2v/vm-migration-detective/pkg/checks"
-	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -17,16 +16,16 @@ import (
 type VMHandler struct {
 	vmService *vmware.VMService
 	vmClient  *vmware.Client
-	inspector *persistent.Inspector
+	detector  *vmdetect.Detector
 	logger    *logrus.Logger
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, detector *vmdetect.Detector, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
 		vmService: vmService,
 		vmClient:  vmClient,
-		inspector: inspector,
+		detector:  detector,
 		logger:    logger,
 	}
 }
@@ -157,6 +156,7 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 
 	// Convert detailed VM info to API response
 	vm := types.VM{
+		Moref:      result.VM.Moref,
 		UUID:       result.VM.UUID,
 		Name:       result.VM.Name,
 		PowerState: result.VM.PowerState,
@@ -193,12 +193,12 @@ func (h *VMHandler) GetVM(c *gin.Context) {
 	var snapshots []types.VMSnapshot
 	for _, snap := range result.VM.Snapshots {
 		snapshots = append(snapshots, types.VMSnapshot{
+			Moref:       snap.Moref,
 			Name:        snap.Name,
 			Description: snap.Description,
 			CreateTime:  snap.CreateTime,
 			State:       snap.State,
 			Quiesced:    snap.Quiesced,
-			ID:          snap.ID,
 		})
 	}
 
@@ -381,138 +381,6 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
-// InspectSnapshot godoc
-// @Summary Inspect a VM snapshot directly
-// @Description Run virt-inspector or virt-v2v-inspector on a VM snapshot using VDDK
-// @Tags vms
-// @Accept json
-// @Produce json
-// @Param vm query string true "Original VM name" example("web-server-01")
-// @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param inspector query string false "Inspector type: 'virt-inspector' (default) or 'virt-v2v-inspector'" example("virt-inspector")
-// @Success 200 {object} types.VMInspectionResponse "Inspection completed successfully"
-// @Failure 400 {object} types.ErrorResponse "Invalid request"
-// @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
-// @Failure 500 {object} types.ErrorResponse "Internal server error"
-// @Router /api/v1/vms/inspect-snapshot [post]
-func (h *VMHandler) InspectSnapshot(c *gin.Context) {
-	vmName := c.Query("vm")
-	snapshotName := c.Query("snapshot")
-	inspectorType := c.DefaultQuery("inspector", "virt-inspector") // Default to virt-inspector
-
-	if vmName == "" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "VM name is required",
-			Code:    "MISSING_VM_NAME",
-			Details: "Please provide VM name as query parameter: ?vm=xxx",
-		})
-		return
-	}
-
-	if snapshotName == "" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "Snapshot name is required",
-			Code:    "MISSING_SNAPSHOT_NAME",
-			Details: "Please provide snapshot name as query parameter: &snapshot=xxx",
-		})
-		return
-	}
-
-	h.logger.WithFields(logrus.Fields{
-		"vm_name":        vmName,
-		"snapshot_name":  snapshotName,
-		"inspector_type": inspectorType,
-	}).Info("Inspecting VM snapshot with VDDK")
-
-	// Validate inspector type
-	if inspectorType != "virt-inspector" && inspectorType != "virt-v2v-inspector" {
-		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "Invalid inspector type",
-			Code:    "INVALID_INSPECTOR_TYPE",
-			Details: fmt.Sprintf("inspector must be 'virt-inspector' or 'virt-v2v-inspector', got: %s", inspectorType),
-		})
-		return
-	}
-
-	// SSL verification option for vpx:// URL
-	// Using no_verify=1 for now to simplify (can be enhanced later with certificate support)
-	sslVerify := "no_verify=1"
-
-	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get datacenter name")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
-
-	// Get snapshot disk info (morefs and disk path) from vm_service
-	h.logger.Debug("Getting snapshot disk info from vm_service")
-	diskInfo, err := h.vmService.GetSnapshotDiskInfo(c.Request.Context(), vmName, snapshotName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get snapshot disk info")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: fmt.Sprintf("failed to get snapshot disk info: %v", err),
-		})
-		return
-	}
-
-	// Use the selected inspector to inspect snapshot
-	var response types.VMInspectionResponse
-	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
-
-	if inspectorType == "virt-v2v-inspector" {
-		h.logger.Info("Running virt-v2v-inspector with VDDK on snapshot")
-		inspectionData, err := h.inspector.InspectWithVirtV2v(
-			c.Request.Context(),
-			vmName,
-			snapshotName,
-			datacenter,
-			diskInfo,
-			sslVerify,
-		)
-		if err != nil {
-			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
-			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-				Error:   "Inspection failed",
-				Code:    "INSPECTION_FAILED",
-				Details: err.Error(),
-			})
-			return
-		}
-		response = types.NewVirtV2VInspectorResponse(vmName, snapshotName, message, inspectionData)
-	} else {
-		// Default: use virt-inspector
-		h.logger.Info("Running virt-inspector with VDDK on snapshot")
-		inspectionData, err := h.inspector.InspectWithVirt(
-			c.Request.Context(),
-			vmName,
-			snapshotName,
-			datacenter,
-			diskInfo,
-		)
-		if err != nil {
-			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
-			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-				Error:   "Inspection failed",
-				Code:    "INSPECTION_FAILED",
-				Details: err.Error(),
-			})
-			return
-		}
-		response = types.NewVirtInspectorResponse(vmName, snapshotName, message, inspectionData)
-	}
-
-	h.logger.WithField("inspector_type", inspectorType).Info("Snapshot inspection completed successfully")
-	c.JSON(http.StatusOK, response)
-}
-
-// DeleteClone godoc
 // @Summary Delete a cloned VM
 // @Description Delete a cloned VM created for inspection
 // @Tags vms
@@ -667,6 +535,7 @@ func (h *VMHandler) CreateVMSnapshot(c *gin.Context) {
 // convertVMInfoToVM converts internal VMInfo to API VM type
 func (h *VMHandler) convertVMInfoToVM(vmInfo vmware.VMInfo) types.VM {
 	return types.VM{
+		Moref:      vmInfo.Moref,
 		UUID:       vmInfo.UUID,
 		Name:       vmInfo.Name,
 		PowerState: vmInfo.PowerState,
@@ -730,158 +599,125 @@ func toLower(b byte) byte {
 	return b
 }
 
-// RunCheck godoc
-// @Summary Run validation checks on a VM snapshot
-// @Description Run validation checks on a VM snapshot. If check parameter is provided, runs that specific check. If omitted, runs all available checks.
+
+// RunDetect godoc
+// @Summary Run VM detection checks using vmdetect API
+// @Description Run detection checks on a VM snapshot using the new vmdetect library API. Returns structured concerns with severity levels.
 // @Tags vms
 // @Accept json
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param check query string false "Check type to run (fstab, disk-access). If omitted, runs all checks." example("fstab")
-// @Success 200 {object} types.CheckResponse "Check completed successfully"
+// @Param checks query []string false "Specific checks to run (fstab, disk-access). If omitted, runs all checks." collectionFormat(multi)
+// @Success 200 {object} types.DetectResponse "Detection completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
 // @Failure 500 {object} types.ErrorResponse "Internal server error"
-// @Router /api/v1/vms/check [post]
-func (h *VMHandler) RunCheck(c *gin.Context) {
-	vmName := c.Query("vm")
-	snapshotName := c.Query("snapshot")
-	checkType := c.Query("check")
+// @Router /api/v1/vms/detect [post]
+func (h *VMHandler) RunDetect(c *gin.Context) {
+	vmMoref := c.Query("vm_moref")
+	snapshotMoref := c.Query("snapshot_moref")
+	checkTypesParam := c.QueryArray("checks")
 
-	if vmName == "" {
+	if vmMoref == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "VM name is required",
-			Code:    "MISSING_VM_NAME",
-			Details: "Please provide VM name as query parameter: ?vm=xxx",
+			Error:   "VM moref is required",
+			Code:    "MISSING_VM_MOREF",
+			Details: "Please provide VM moref as query parameter: ?vm_moref=vm-123",
 		})
 		return
 	}
 
-	if snapshotName == "" {
+	if snapshotMoref == "" {
 		c.JSON(http.StatusBadRequest, types.ErrorResponse{
-			Error:   "Snapshot name is required",
-			Code:    "MISSING_SNAPSHOT_NAME",
-			Details: "Please provide snapshot name as query parameter: &snapshot=xxx",
+			Error:   "Snapshot moref is required",
+			Code:    "MISSING_SNAPSHOT_MOREF",
+			Details: "Please provide snapshot moref as query parameter: &snapshot_moref=snapshot-456",
 		})
 		return
 	}
 
-	logFields := logrus.Fields{
-		"vm_name":       vmName,
-		"snapshot_name": snapshotName,
-	}
-	if checkType != "" {
-		logFields["check_type"] = checkType
-		h.logger.WithFields(logFields).Info("Running specific validation check on VM snapshot")
-	} else {
-		h.logger.WithFields(logFields).Info("Running all validation checks on VM snapshot")
+	h.logger.WithFields(logrus.Fields{
+		"vm_moref":       vmMoref,
+		"snapshot_moref": snapshotMoref,
+		"checks":         checkTypesParam,
+	}).Info("Running VM detection checks")
+
+	// Parse check types from query params
+	var checkTypes []vmdetect.CheckType
+	if len(checkTypesParam) > 0 {
+		for _, ct := range checkTypesParam {
+			checkType := vmdetect.CheckType(ct)
+			if !vmdetect.IsValidCheckType(checkType) {
+				c.JSON(http.StatusBadRequest, types.ErrorResponse{
+					Error:   "Invalid check type",
+					Code:    "INVALID_CHECK_TYPE",
+					Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", ct),
+				})
+				return
+			}
+			checkTypes = append(checkTypes, checkType)
+		}
 	}
 
-	// Get datacenter name
-	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
+	// Run detection using vmdetect API
+	result, err := h.detector.Detect(vmdetect.DetectParams{
+		Ctx:           c.Request.Context(),
+		VMMoref:       vmMoref,
+		SnapshotMoref: snapshotMoref,
+	}, checkTypes...)
+
 	if err != nil {
-		h.logger.WithError(err).Error("failed to get datacenter name")
+		h.logger.WithError(err).Error("detection checks failed")
 		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Check failed",
-			Code:    "CHECK_FAILED",
+			Error:   "Detection failed",
+			Code:    "DETECTION_FAILED",
 			Details: err.Error(),
 		})
 		return
 	}
 
-	// Get snapshot disk info
-	h.logger.Debug("Getting snapshot disk info from vm_service")
-	diskInfo, err := h.vmService.GetSnapshotDiskInfo(c.Request.Context(), vmName, snapshotName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get snapshot disk info")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Check failed",
-			Code:    "CHECK_FAILED",
-			Details: fmt.Sprintf("failed to get snapshot disk info: %v", err),
+	// Convert vmdetect result to API response
+	response := types.DetectResponse{
+		VMName:       vmMoref, // Using VMMoref as VMName for now (can update response struct later)
+		SnapshotName: snapshotMoref,
+		Results:      make([]types.DetectCheckResult, 0, len(result.Results)),
+		AllConcerns:  convertConcernsToDetectConcerns(result.AllConcerns),
+		Passed:       result.Passed,
+		OSInfo:       result.OSInfo,
+		Applications: result.Applications,
+		Filesystems:  result.Filesystems,
+		Mountpoints:  result.Mountpoints,
+	}
+
+	for _, r := range result.Results {
+		response.Results = append(response.Results, types.DetectCheckResult{
+			CheckType: string(r.CheckType),
+			Passed:    r.Passed,
+			Concerns:  convertConcernsToDetectConcerns(r.Concerns),
+			Error:     r.Error,
 		})
-		return
-	}
-
-	// Get vCenter credentials from vmClient
-	vcenterURL := h.vmClient.GetVCenterURL()
-	username, password := h.vmClient.GetCredentials()
-
-	// Create inspection params
-	params := checks.InspectionParams{
-		Ctx:          c.Request.Context(),
-		VMName:       vmName,
-		SnapshotName: snapshotName,
-		Datacenter:   datacenter,
-		VCenterURL:   vcenterURL,
-		Username:     username,
-		Password:     password,
-		DiskInfo:     diskInfo,
-		DB:           h.inspector.GetDB(),
-		Logger:       h.logger,
-	}
-
-	// Define all available checks
-	allChecks := map[string]checks.Check{
-		"fstab":       checks.NewFstabCheck(),
-		"disk-access": checks.NewDiskAccessCheck(),
-	}
-
-	// Determine which checks to run
-	var checksToRun map[string]checks.Check
-	if checkType != "" {
-		// Run specific check
-		check, exists := allChecks[checkType]
-		if !exists {
-			c.JSON(http.StatusBadRequest, types.ErrorResponse{
-				Error:   "Unknown check type",
-				Code:    "UNKNOWN_CHECK_TYPE",
-				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", checkType),
-			})
-			return
-		}
-		checksToRun = map[string]checks.Check{checkType: check}
-	} else {
-		// Run all checks
-		checksToRun = allChecks
-	}
-
-	// Execute all selected checks
-	var results []types.CheckResult
-	allValid := true
-
-	for name, check := range checksToRun {
-		h.logger.WithField("check_type", name).Info("Executing validation check")
-		result := check.Run(params)
-
-		results = append(results, types.CheckResult{
-			CheckType: name,
-			Valid:     result.Valid,
-			Message:   result.Message,
-			Error:     result.Error,
-		})
-
-		if !result.Valid {
-			allValid = false
-		}
-
-		h.logger.WithFields(logrus.Fields{
-			"check_type": name,
-			"valid":      result.Valid,
-		}).Info("Validation check completed")
-	}
-
-	response := types.CheckResponse{
-		VMName:       vmName,
-		SnapshotName: snapshotName,
-		Results:      results,
-		AllValid:     allValid,
 	}
 
 	h.logger.WithFields(logrus.Fields{
-		"checks_run": len(results),
-		"all_valid":  allValid,
-	}).Info("All validation checks completed")
+		"checks_run":    len(result.Results),
+		"passed":        result.Passed,
+		"total_concerns": len(result.AllConcerns),
+	}).Info("VM detection checks completed")
 
 	c.JSON(http.StatusOK, response)
+}
+
+// convertConcernsToDetectConcerns converts vmdetect.Concern to types.DetectConcern
+func convertConcernsToDetectConcerns(concerns []vmdetect.Concern) []types.DetectConcern {
+	result := make([]types.DetectConcern, len(concerns))
+	for i, c := range concerns {
+		result[i] = types.DetectConcern{
+			ID:       c.ID,
+			Category: string(c.Category),
+			Label:    c.Label,
+			Message:  c.Message,
+		}
+	}
+	return result
 }

@@ -34,6 +34,7 @@ type VMFilter struct {
 
 // VMInfo represents basic information about a virtual machine
 type VMInfo struct {
+	Moref      string `json:"moref"`
 	UUID       string `json:"uuid"`
 	Name       string `json:"name"`
 	PowerState string `json:"power_state"`
@@ -62,12 +63,13 @@ type VMNetworkAdapterInfo struct {
 
 // VMSnapshotInfo represents snapshot information
 type VMSnapshotInfo struct {
+	Moref       string    `json:"moref"`
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	CreateTime  time.Time `json:"create_time"`
 	State       string    `json:"state"`
 	Quiesced    bool      `json:"quiesced"`
-	ID          int32     `json:"id"`
+	ID          int32     `json:"id"` // Legacy database ID, use Moref instead
 }
 
 // VMResourceAllocation represents resource allocation settings
@@ -85,6 +87,7 @@ type VMResourceAllocation struct {
 // VMDetailedInfo represents comprehensive information about a virtual machine
 type VMDetailedInfo struct {
 	// Basic Info
+	Moref             string   `json:"moref"`
 	UUID              string   `json:"uuid"`
 	Name              string   `json:"name"`
 	PowerState        string   `json:"power_state"`
@@ -489,6 +492,7 @@ func (s *VMService) ListVMs(ctx context.Context, filter VMFilter) (*VMListResult
 // convertToVMInfo converts a vSphere VM managed object to VMInfo
 func (s *VMService) convertToVMInfo(vm mo.VirtualMachine) *VMInfo {
 	return &VMInfo{
+		Moref:      vm.Reference().Value,
 		UUID:       vm.Config.Uuid,
 		Name:       vm.Name,
 		PowerState: string(vm.Runtime.PowerState),
@@ -498,6 +502,7 @@ func (s *VMService) convertToVMInfo(vm mo.VirtualMachine) *VMInfo {
 // convertToVMDetailedInfo converts a vSphere VM managed object to VMDetailedInfo
 func (s *VMService) convertToVMDetailedInfo(vm mo.VirtualMachine) *VMDetailedInfo {
 	info := &VMDetailedInfo{
+		Moref:      vm.Reference().Value,
 		UUID:       vm.Config.Uuid,
 		Name:       vm.Name,
 		PowerState: string(vm.Runtime.PowerState),
@@ -715,47 +720,10 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	// Get snapshot moref
 	snapshotMoref := snapshotRef.Snapshot.Value
 
-	// Get disk paths from ALL virtual disks (not just the first one)
-	// Use ParentFile (backing.Parent.FileName) if available
-	// This is the base/parent disk file that the snapshot was created from
-	var diskPaths []string
-	var baseDiskPaths []string
-
-	for _, device := range vmMo.Config.Hardware.Device {
-		if disk, ok := device.(*vimtypes.VirtualDisk); ok {
-			if backing, ok := disk.Backing.(*vimtypes.VirtualDiskFlatVer2BackingInfo); ok {
-				diskPath := backing.FileName
-				diskPaths = append(diskPaths, diskPath)
-
-				// Check if backing has a Parent
-				// Parent points to the base disk file that the snapshot was created from
-				var baseDiskPath string
-				if backing.Parent != nil && backing.Parent.FileName != "" {
-					baseDiskPath = backing.Parent.FileName
-					s.logger.WithFields(logrus.Fields{
-						"disk_path":   diskPath,
-						"parent_file": baseDiskPath,
-					}).Debug("Found parent file from disk backing")
-				} else {
-					// Fallback: calculate base disk path (remove delta disk suffix like -000002)
-					baseDiskPath = s.getBaseDiskPath(diskPath)
-					s.logger.WithFields(logrus.Fields{
-						"disk_path":      diskPath,
-						"calculated_base": baseDiskPath,
-					}).Debug("Calculated base disk path (no parent in backing)")
-				}
-				baseDiskPaths = append(baseDiskPaths, baseDiskPath)
-			}
-		}
-	}
-
-	if len(diskPaths) == 0 {
-		return nil, fmt.Errorf("no disks found for VM '%s'", vmName)
-	}
-
-	if len(baseDiskPaths) == 0 {
-		return nil, fmt.Errorf("no base disk paths found for VM '%s'", vmName)
-	}
+	// Note: We no longer calculate base disk paths here.
+	// The vm-migration-detective library now queries vSphere directly
+	// to traverse the backing chain and find base disks.
+	// We only need to provide VM moref and snapshot moref.
 
 	// Get compute resource path (host/cluster) for vpx:// URL
 	var computeResourcePath string
@@ -794,19 +762,16 @@ func (s *VMService) GetSnapshotDiskInfo(ctx context.Context, vmName string, snap
 	}
 
 	s.logger.WithFields(logrus.Fields{
-		"vm_moref":             vmMoref,
-		"snapshot_moref":       snapshotMoref,
-		"disk_count":           len(diskPaths),
-		"disk_paths":           diskPaths,
-		"base_disk_paths":      baseDiskPaths,
+		"vm_moref":              vmMoref,
+		"snapshot_moref":        snapshotMoref,
 		"compute_resource_path": computeResourcePath,
-	}).Debug("Got snapshot disk info")
+	}).Debug("Got snapshot disk info (library will query disk paths)")
 
 	return &types.SnapshotDiskInfo{
 		VMMoref:             vmMoref,
 		SnapshotMoref:       snapshotMoref,
-		DiskPaths:           diskPaths,
-		BaseDiskPaths:       baseDiskPaths,
+		DiskPaths:           nil, // Library queries vSphere for disk paths
+		BaseDiskPaths:       nil, // Library queries vSphere and traverses backing chain
 		ComputeResourcePath: computeResourcePath,
 	}, nil
 }
@@ -961,6 +926,7 @@ func (s *VMService) extractSnapshotInfo(snapshots []vimtypes.VirtualMachineSnaps
 	var result []VMSnapshotInfo
 	for _, snap := range snapshots {
 		info := VMSnapshotInfo{
+			Moref:       snap.Snapshot.Value,
 			Name:        snap.Name,
 			Description: snap.Description,
 			CreateTime:  snap.CreateTime,

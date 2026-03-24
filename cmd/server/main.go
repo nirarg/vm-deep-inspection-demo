@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"
@@ -91,23 +91,27 @@ func main() {
 	}
 	log.Info("Inspection database schema migrated")
 
-	// Initialize persistent inspector with credentials and DB
-	credentials := persistent.Credentials{
+	// Initialize vCenter credentials
+	credentials := vmdetect.Credentials{
 		VCenterURL: cfg.VMware.VCenterURL,
 		Username:   cfg.VMware.Username,
 		Password:   cfg.VMware.Password,
 	}
-	inspector := persistent.NewInspector(
-		"",    // virt-inspector path (uses system PATH)
-		"",    // virt-v2v-inspector path (uses system PATH)
-		30*time.Minute, // timeout
-		credentials,
-		log,
-		inspectionDB, // Use file-based DB persistence
-	)
+
+	// Initialize vmdetect Detector
+	detector, err := vmdetect.NewDetector(vmdetect.DetectorConfig{
+		Credentials: credentials,
+		VDDKLibDir:  cfg.VDDK.LibDir,
+		Logger:      log,
+		DB:          inspectionDB,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize Detector: %v", err)
+	}
+	log.Info("Detector initialized")
 
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, detector, log)
 
 	// Setup router
 	router := gin.Default()
@@ -131,15 +135,12 @@ func main() {
 		v1.GET("/vms/:name", vmHandler.GetVM)
 		v1.POST("/vms/snapshot", vmHandler.CreateVMSnapshot)
 
-		// Clone and inspection routes
+		// Clone routes
 		v1.POST("/vms/clone", vmHandler.CreateClone)
 		v1.DELETE("/vms/delete-clone", vmHandler.DeleteClone)
 
-		// Snapshot inspection route (direct inspection without clone)
-		v1.POST("/vms/inspect-snapshot", vmHandler.InspectSnapshot)
-
-		// Validation checks route (generic check runner)
-		v1.POST("/vms/check", vmHandler.RunCheck)
+		// VM detection route (vmdetect API)
+		v1.POST("/vms/detect", vmHandler.RunDetect)
 	}
 
 	// Swagger documentation endpoint
