@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"
@@ -91,23 +91,27 @@ func main() {
 	}
 	log.Info("Inspection database schema migrated")
 
-	// Initialize persistent inspector with credentials and DB
-	credentials := persistent.Credentials{
-		VCenterURL: cfg.VMware.VCenterURL,
-		Username:   cfg.VMware.Username,
-		Password:   cfg.VMware.Password,
+	// Initialize detector with credentials and DB
+	// For now, use a placeholder for VDDKLibDir - will need to be configured properly
+	vddkLibDir := "/opt/vmware-vix-disklib" // Default location, should be configurable
+	timeout := 30 * time.Minute
+	detector, err := vmdetect.NewDetector(vmdetect.DetectorConfig{
+		Credentials: vmdetect.Credentials{
+			VCenterURL: cfg.VMware.VCenterURL,
+			Username:   cfg.VMware.Username,
+			Password:   cfg.VMware.Password,
+		},
+		VDDKLibDir: vddkLibDir,
+		Timeout:    &timeout,
+		Logger:     log,
+		DB:         inspectionDB,
+	})
+	if err != nil {
+		log.Fatalf("Failed to initialize detector: %v", err)
 	}
-	inspector := persistent.NewInspector(
-		"",    // virt-inspector path (uses system PATH)
-		"",    // virt-v2v-inspector path (uses system PATH)
-		30*time.Minute, // timeout
-		credentials,
-		log,
-		inspectionDB, // Use file-based DB persistence
-	)
 
 	// Initialize handlers
-	vmHandler := api.NewVMHandler(vmService, vmwareClient, inspector, log)
+	vmHandler := api.NewVMHandler(vmService, vmwareClient, detector, log)
 
 	// Setup router
 	router := gin.Default()

@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kubev2v/vm-migration-detective/pkg/checks"
-	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
+	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/nirarg/vm-deep-inspection-demo/pkg/types"
 	"github.com/sirupsen/logrus"
@@ -17,16 +17,16 @@ import (
 type VMHandler struct {
 	vmService *vmware.VMService
 	vmClient  *vmware.Client
-	inspector *persistent.Inspector
+	detector  *vmdetect.Detector
 	logger    *logrus.Logger
 }
 
 // NewVMHandler creates a new VM handler instance
-func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, inspector *persistent.Inspector, logger *logrus.Logger) *VMHandler {
+func NewVMHandler(vmService *vmware.VMService, vmClient *vmware.Client, detector *vmdetect.Detector, logger *logrus.Logger) *VMHandler {
 	return &VMHandler{
 		vmService: vmService,
 		vmClient:  vmClient,
-		inspector: inspector,
+		detector:  detector,
 		logger:    logger,
 	}
 }
@@ -434,20 +434,8 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// SSL verification option for vpx:// URL
-	// Using no_verify=1 for now to simplify (can be enhanced later with certificate support)
-	sslVerify := "no_verify=1"
-
-	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get datacenter name")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Inspection failed",
-			Code:    "INSPECTION_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
+	// The new vmdetect API doesn't need SSL verify or datacenter parameters
+	// They are handled internally by the Detector
 
 	// Get snapshot disk info (morefs and disk path) from vm_service
 	h.logger.Debug("Getting snapshot disk info from vm_service")
@@ -466,46 +454,46 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	var response types.VMInspectionResponse
 	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
 
-	if inspectorType == "virt-v2v-inspector" {
-		h.logger.Info("Running virt-v2v-inspector with VDDK on snapshot")
-		inspectionData, err := h.inspector.InspectWithVirtV2v(
-			c.Request.Context(),
-			vmName,
-			snapshotName,
-			datacenter,
-			diskInfo,
-			sslVerify,
-		)
-		if err != nil {
-			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
-			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-				Error:   "Inspection failed",
-				Code:    "INSPECTION_FAILED",
-				Details: err.Error(),
-			})
-			return
-		}
-		response = types.NewVirtV2VInspectorResponse(vmName, snapshotName, message, inspectionData)
-	} else {
-		// Default: use virt-inspector
-		h.logger.Info("Running virt-inspector with VDDK on snapshot")
-		inspectionData, err := h.inspector.InspectWithVirt(
-			c.Request.Context(),
-			vmName,
-			snapshotName,
-			datacenter,
-			diskInfo,
-		)
-		if err != nil {
-			h.logger.WithError(err).WithField("inspector_type", inspectorType).Error("inspection execution failed")
-			c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-				Error:   "Inspection failed",
-				Code:    "INSPECTION_FAILED",
-				Details: err.Error(),
-			})
-			return
-		}
-		response = types.NewVirtInspectorResponse(vmName, snapshotName, message, inspectionData)
+	// TODO: The new vmdetect.Detector API doesn't support direct virt-v2v-inspector calls
+	// For now, we'll use the Detect() method which internally uses virt-inspector
+	// This endpoint may need to be redesigned or the library extended
+	h.logger.Info("Running inspection with VDDK on snapshot")
+
+	// The new API requires VM and snapshot morefs, not names
+	// We need to get them from the diskInfo
+	detectResult, err := h.detector.Detect(vmdetect.DetectParams{
+		Ctx:           c.Request.Context(),
+		VMMoref:       diskInfo.VMMoref,
+		SnapshotMoref: diskInfo.SnapshotMoref,
+	})
+	if err != nil {
+		h.logger.WithError(err).Error("inspection execution failed")
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Error:   "Inspection failed",
+			Code:    "INSPECTION_FAILED",
+			Details: err.Error(),
+		})
+		return
+	}
+
+	// Convert the detection result to the inspection response format
+	// The new API returns OSInfo, Applications, Filesystems, etc. in the DetectResult
+	// We'll put it in the VirtInspector field for compatibility
+	response = types.VMInspectionResponse{
+		VMName:        vmName,
+		SnapshotName:  snapshotName,
+		Status:        "success",
+		Message:       message,
+		InspectorType: inspectorType,
+		VirtInspector: map[string]interface{}{
+			"operating_system": detectResult.OSInfo,
+			"applications":     detectResult.Applications,
+			"filesystems":      detectResult.Filesystems,
+			"mountpoints":      detectResult.Mountpoints,
+			"check_results":    detectResult.Results,
+			"all_concerns":     detectResult.AllConcerns,
+			"passed":           detectResult.Passed,
+		},
 	}
 
 	h.logger.WithField("inspector_type", inspectorType).Info("Snapshot inspection completed successfully")
@@ -778,18 +766,6 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 		h.logger.WithFields(logFields).Info("Running all validation checks on VM snapshot")
 	}
 
-	// Get datacenter name
-	datacenter, err := h.vmService.GetDatacenterName(c.Request.Context(), vmName)
-	if err != nil {
-		h.logger.WithError(err).Error("failed to get datacenter name")
-		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
-			Error:   "Check failed",
-			Code:    "CHECK_FAILED",
-			Details: err.Error(),
-		})
-		return
-	}
-
 	// Get snapshot disk info
 	h.logger.Debug("Getting snapshot disk info from vm_service")
 	diskInfo, err := h.vmService.GetSnapshotDiskInfo(c.Request.Context(), vmName, snapshotName)
@@ -803,36 +779,17 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 		return
 	}
 
-	// Get vCenter credentials from vmClient
-	vcenterURL := h.vmClient.GetVCenterURL()
-	username, password := h.vmClient.GetCredentials()
-
-	// Create inspection params
-	params := checks.InspectionParams{
-		Ctx:          c.Request.Context(),
-		VMName:       vmName,
-		SnapshotName: snapshotName,
-		Datacenter:   datacenter,
-		VCenterURL:   vcenterURL,
-		Username:     username,
-		Password:     password,
-		DiskInfo:     diskInfo,
-		DB:           h.inspector.GetDB(),
-		Logger:       h.logger,
-	}
-
-	// Define all available checks
-	allChecks := map[string]checks.Check{
-		"fstab":       checks.NewFstabCheck(),
-		"disk-access": checks.NewDiskAccessCheck(),
-	}
-
-	// Determine which checks to run
-	var checksToRun map[string]checks.Check
+	// The new vmdetect API integrates checks into the Detect() method
+	// We need to map the old check names to the new CheckType enum
+	var checkTypes []checks.CheckType
 	if checkType != "" {
 		// Run specific check
-		check, exists := allChecks[checkType]
-		if !exists {
+		switch checkType {
+		case "fstab":
+			checkTypes = []checks.CheckType{checks.CheckTypeFstab}
+		case "disk-access":
+			checkTypes = []checks.CheckType{checks.CheckTypeDiskAccess}
+		default:
 			c.JSON(http.StatusBadRequest, types.ErrorResponse{
 				Error:   "Unknown check type",
 				Code:    "UNKNOWN_CHECK_TYPE",
@@ -840,35 +797,44 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 			})
 			return
 		}
-		checksToRun = map[string]checks.Check{checkType: check}
-	} else {
-		// Run all checks
-		checksToRun = allChecks
+	}
+	// If checkType is empty, checkTypes will be nil and Detect will run all checks
+
+	h.logger.WithFields(logrus.Fields{
+		"vm_moref":       diskInfo.VMMoref,
+		"snapshot_moref": diskInfo.SnapshotMoref,
+		"check_types":    checkTypes,
+	}).Info("Running checks via Detector")
+
+	// Run checks using the new Detector API
+	detectResult, err := h.detector.Detect(vmdetect.DetectParams{
+		Ctx:           c.Request.Context(),
+		VMMoref:       diskInfo.VMMoref,
+		SnapshotMoref: diskInfo.SnapshotMoref,
+	}, checkTypes...)
+	if err != nil {
+		h.logger.WithError(err).Error("check execution failed")
+		c.JSON(http.StatusInternalServerError, types.ErrorResponse{
+			Error:   "Check failed",
+			Code:    "CHECK_FAILED",
+			Details: err.Error(),
+		})
+		return
 	}
 
-	// Execute all selected checks
+	// Convert the new CheckResult format to the old format
 	var results []types.CheckResult
-	allValid := true
+	allValid := detectResult.Passed
 
-	for name, check := range checksToRun {
-		h.logger.WithField("check_type", name).Info("Executing validation check")
-		result := check.Run(params)
+	for _, result := range detectResult.Results {
+		checkTypeName := string(result.CheckType)
 
 		results = append(results, types.CheckResult{
-			CheckType: name,
-			Valid:     result.Valid,
-			Message:   result.Message,
-			Error:     result.Error,
+			CheckType: checkTypeName,
+			Valid:     result.Passed,
+			Message:   fmt.Sprintf("Check completed with %d concerns", len(result.Concerns)),
+			Error:     result.Error, // Already a *string
 		})
-
-		if !result.Valid {
-			allValid = false
-		}
-
-		h.logger.WithFields(logrus.Fields{
-			"check_type": name,
-			"valid":      result.Valid,
-		}).Info("Validation check completed")
 	}
 
 	response := types.CheckResponse{

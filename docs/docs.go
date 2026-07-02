@@ -59,6 +59,72 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/vms/check": {
+            "post": {
+                "description": "Run validation checks on a VM snapshot. If check parameter is provided, runs that specific check. If omitted, runs all available checks.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "vms"
+                ],
+                "summary": "Run validation checks on a VM snapshot",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "example": "\"web-server-01\"",
+                        "description": "Original VM name",
+                        "name": "vm",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"inspection-snapshot\"",
+                        "description": "Snapshot name",
+                        "name": "snapshot",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"fstab\"",
+                        "description": "Check type to run (fstab, disk-access). If omitted, runs all checks.",
+                        "name": "check",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Check completed successfully",
+                        "schema": {
+                            "$ref": "#/definitions/types.CheckResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "VM or snapshot not found",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/vms/clone": {
             "post": {
                 "description": "Create a linked clone from a VM snapshot for inspection",
@@ -170,60 +236,9 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/vms/inspect-clone": {
-            "post": {
-                "description": "Run virt-inspector on a cloned VM",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "vms"
-                ],
-                "summary": "Inspect a cloned VM",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "example": "\"web-server-01-clone-123\"",
-                        "description": "Clone VM name",
-                        "name": "name",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Inspection completed successfully",
-                        "schema": {
-                            "$ref": "#/definitions/types.VMInspectionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request",
-                        "schema": {
-                            "$ref": "#/definitions/types.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Clone not found",
-                        "schema": {
-                            "$ref": "#/definitions/types.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "schema": {
-                            "$ref": "#/definitions/types.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/vms/inspect-snapshot": {
             "post": {
-                "description": "Run virt-inspector on a VM snapshot using VDDK",
+                "description": "Run virt-inspector or virt-v2v-inspector on a VM snapshot using VDDK",
                 "consumes": [
                     "application/json"
                 ],
@@ -250,6 +265,13 @@ const docTemplate = `{
                         "name": "snapshot",
                         "in": "query",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "example": "\"virt-inspector\"",
+                        "description": "Inspector type: 'virt-inspector' (default) or 'virt-v2v-inspector'",
+                        "name": "inspector",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -405,38 +427,47 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "types.Application": {
+        "types.CheckResponse": {
             "type": "object",
             "properties": {
-                "arch": {
+                "all_valid": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/types.CheckResult"
+                    }
+                },
+                "snapshot_name": {
                     "type": "string",
-                    "example": "amd64"
+                    "example": "backup-snapshot"
                 },
-                "description": {
+                "vm_name": {
                     "type": "string",
-                    "example": "nginx is a web server with a strong focus on high concurrency"
-                },
-                "epoch": {
-                    "type": "integer"
-                },
-                "name": {
+                    "example": "web-server-01"
+                }
+            }
+        },
+        "types.CheckResult": {
+            "type": "object",
+            "properties": {
+                "check_type": {
                     "type": "string",
-                    "example": "nginx"
+                    "example": "fstab"
                 },
-                "release": {
-                    "type": "string"
-                },
-                "summary": {
+                "error": {
                     "type": "string",
-                    "example": "High performance web server"
+                    "example": "Failed to run inspection: connection timeout"
                 },
-                "url": {
+                "message": {
                     "type": "string",
-                    "example": "https://nginx.org"
+                    "example": "Fstab is migrateable - no /dev/disk/by-path/ entries found"
                 },
-                "version": {
-                    "type": "string",
-                    "example": "1.18.0"
+                "valid": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -481,22 +512,6 @@ const docTemplate = `{
                 }
             }
         },
-        "types.Drive": {
-            "type": "object",
-            "properties": {
-                "name": {
-                    "type": "string",
-                    "example": "/dev/sda"
-                },
-                "size": {
-                    "type": "integer"
-                },
-                "type": {
-                    "type": "string",
-                    "example": "disk"
-                }
-            }
-        },
         "types.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -511,119 +526,6 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "Invalid request"
-                }
-            }
-        },
-        "types.Filesystem": {
-            "type": "object",
-            "properties": {
-                "device": {
-                    "type": "string",
-                    "example": "/dev/sda1"
-                },
-                "size": {
-                    "type": "integer"
-                },
-                "type": {
-                    "type": "string",
-                    "example": "ext4"
-                },
-                "used": {
-                    "type": "integer"
-                },
-                "uuid": {
-                    "type": "string",
-                    "example": "ac818163-71e7-4b23-a1b7-e94196b9dada"
-                }
-            }
-        },
-        "types.InspectionData": {
-            "type": "object",
-            "properties": {
-                "applications": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.Application"
-                    }
-                },
-                "drives": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.Drive"
-                    }
-                },
-                "filesystems": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.Filesystem"
-                    }
-                },
-                "mountpoints": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/types.Mountpoint"
-                    }
-                },
-                "operating_system": {
-                    "$ref": "#/definitions/types.OSInfo"
-                }
-            }
-        },
-        "types.Mountpoint": {
-            "type": "object",
-            "properties": {
-                "device": {
-                    "type": "string",
-                    "example": "/dev/sda1"
-                },
-                "mount_point": {
-                    "type": "string",
-                    "example": "/boot"
-                }
-            }
-        },
-        "types.OSInfo": {
-            "type": "object",
-            "properties": {
-                "architecture": {
-                    "type": "string",
-                    "example": "x86_64"
-                },
-                "distro": {
-                    "type": "string",
-                    "example": "ubuntu"
-                },
-                "hostname": {
-                    "type": "string",
-                    "example": "web-server-01"
-                },
-                "name": {
-                    "type": "string",
-                    "example": "linux"
-                },
-                "osinfo": {
-                    "type": "string",
-                    "example": "centos9"
-                },
-                "package_format": {
-                    "type": "string",
-                    "example": "rpm"
-                },
-                "package_management": {
-                    "type": "string",
-                    "example": "dnf"
-                },
-                "product": {
-                    "type": "string",
-                    "example": "Ubuntu 22.04 LTS"
-                },
-                "root": {
-                    "type": "string",
-                    "example": "/dev/sda1"
-                },
-                "version": {
-                    "type": "string",
-                    "example": "22.04"
                 }
             }
         },
@@ -906,8 +808,9 @@ const docTemplate = `{
         "types.VMInspectionResponse": {
             "type": "object",
             "properties": {
-                "data": {
-                    "$ref": "#/definitions/types.InspectionData"
+                "inspector_type": {
+                    "type": "string",
+                    "example": "virt-inspector"
                 },
                 "message": {
                     "type": "string",
@@ -921,6 +824,8 @@ const docTemplate = `{
                     "type": "string",
                     "example": "completed"
                 },
+                "virt_inspector": {},
+                "virt_v2v": {},
                 "vm_name": {
                     "type": "string",
                     "example": "web-server-01"

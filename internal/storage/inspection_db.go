@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/kubev2v/vm-migration-detective/pkg/persistent"
-	pkgtypes "github.com/kubev2v/vm-migration-detective/pkg/types"
+	"github.com/kubev2v/vm-migration-detective/pkg/types"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
 )
@@ -49,7 +48,7 @@ func NewInspectionDB(db *gorm.DB, logger *logrus.Logger) (*InspectionDB, error) 
 }
 
 // GetVirtInspectorXML retrieves VirtInspector inspection data for a given cache key
-func (db *InspectionDB) GetVirtInspectorXML(ctx context.Context, key persistent.CacheKey) (*pkgtypes.VirtInspectorXML, error) {
+func (db *InspectionDB) GetVirtInspectorXML(ctx context.Context, key types.CacheKey) (*types.VirtInspectorXML, error) {
 	var record VirtInspectorRecord
 	result := db.db.WithContext(ctx).Where("cache_key = ?", key.Hash()).First(&record)
 
@@ -62,7 +61,7 @@ func (db *InspectionDB) GetVirtInspectorXML(ctx context.Context, key persistent.
 	}
 
 	// Unmarshal JSON
-	var data pkgtypes.VirtInspectorXML
+	var data types.VirtInspectorXML
 	if err := json.Unmarshal([]byte(record.DataJSON), &data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal inspection data: %w", err)
 	}
@@ -78,7 +77,7 @@ func (db *InspectionDB) GetVirtInspectorXML(ctx context.Context, key persistent.
 }
 
 // SetVirtInspectorXML stores VirtInspector inspection data for a given cache key
-func (db *InspectionDB) SetVirtInspectorXML(ctx context.Context, key persistent.CacheKey, data *pkgtypes.VirtInspectorXML) error {
+func (db *InspectionDB) SetVirtInspectorXML(ctx context.Context, key types.CacheKey, data *types.VirtInspectorXML) error {
 	// Marshal to JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -86,8 +85,8 @@ func (db *InspectionDB) SetVirtInspectorXML(ctx context.Context, key persistent.
 	}
 
 	record := VirtInspectorRecord{
-		VMName:       key.VMName,
-		SnapshotName: key.SnapshotName,
+		VMName:       key.VMMoref,
+		SnapshotName: key.SnapshotMoref,
 		CacheKey:     key.Hash(),
 		DataJSON:     string(jsonData),
 	}
@@ -109,7 +108,7 @@ func (db *InspectionDB) SetVirtInspectorXML(ctx context.Context, key persistent.
 }
 
 // GetVirtV2VInspectorXML retrieves VirtV2vInspector inspection data for a given cache key
-func (db *InspectionDB) GetVirtV2VInspectorXML(ctx context.Context, key persistent.CacheKey) (*pkgtypes.VirtV2VInspectorXML, error) {
+func (db *InspectionDB) GetVirtV2VInspectorXML(ctx context.Context, key types.CacheKey) (*types.VirtV2VInspectorXML, error) {
 	var record VirtV2VInspectorRecord
 	result := db.db.WithContext(ctx).Where("cache_key = ?", key.Hash()).First(&record)
 
@@ -122,7 +121,7 @@ func (db *InspectionDB) GetVirtV2VInspectorXML(ctx context.Context, key persiste
 	}
 
 	// Unmarshal JSON
-	var data pkgtypes.VirtV2VInspectorXML
+	var data types.VirtV2VInspectorXML
 	if err := json.Unmarshal([]byte(record.DataJSON), &data); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal inspection data: %w", err)
 	}
@@ -138,7 +137,7 @@ func (db *InspectionDB) GetVirtV2VInspectorXML(ctx context.Context, key persiste
 }
 
 // SetVirtV2VInspectorXML stores VirtV2vInspector inspection data for a given cache key
-func (db *InspectionDB) SetVirtV2VInspectorXML(ctx context.Context, key persistent.CacheKey, data *pkgtypes.VirtV2VInspectorXML) error {
+func (db *InspectionDB) SetVirtV2VInspectorXML(ctx context.Context, key types.CacheKey, data *types.VirtV2VInspectorXML) error {
 	// Marshal to JSON
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -146,8 +145,8 @@ func (db *InspectionDB) SetVirtV2VInspectorXML(ctx context.Context, key persiste
 	}
 
 	record := VirtV2VInspectorRecord{
-		VMName:       key.VMName,
-		SnapshotName: key.SnapshotName,
+		VMName:       key.VMMoref,
+		SnapshotName: key.SnapshotMoref,
 		CacheKey:     key.Hash(),
 		DataJSON:     string(jsonData),
 	}
