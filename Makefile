@@ -126,7 +126,7 @@ run: build
 
 ## Run with config file
 run-config: build
-	$(BINARY_PATH) -config config.yaml
+	GOVC_DATACENTER="Eco-Datacenter" $(BINARY_PATH) -config config.yaml
 
 ## Generate OpenAPI documentation
 swagger:

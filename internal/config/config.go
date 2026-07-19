@@ -138,10 +138,18 @@ func Load(configFile string) (*Config, error) {
 		v.AddConfigPath("$HOME/.vm-deep-inspection/")
 	}
 
-	// Enable environment variable support
+	// Enable environment variable support (VMDI_VMWARE_VCENTER_URL, etc.)
 	v.AutomaticEnv()
 	v.SetEnvPrefix("VMDI")
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
+	for _, key := range []string{
+		"vmware.vcenter_url",
+		"vmware.username",
+		"vmware.password",
+		"vmware.insecure_skip_verify",
+	} {
+		_ = v.BindEnv(key)
+	}
 
 	// Read configuration file (optional)
 	if err := v.ReadInConfig(); err != nil {

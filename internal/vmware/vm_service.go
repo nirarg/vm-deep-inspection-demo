@@ -3,6 +3,7 @@ package vmware
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -182,6 +183,19 @@ func NewVMService(client *Client, logger *logrus.Logger) *VMService {
 
 // getDefaultDatacenter is a helper to get the default datacenter
 func (s *VMService) getDefaultDatacenter(ctx context.Context, finder *find.Finder) (*object.Datacenter, error) {
+	// Check for GOVC_DATACENTER environment variable first
+	datacenterName := os.Getenv("GOVC_DATACENTER")
+	if datacenterName != "" {
+		s.logger.WithField("datacenter", datacenterName).Debug("Using datacenter from GOVC_DATACENTER")
+		datacenter, err := finder.Datacenter(ctx, datacenterName)
+		if err != nil {
+			return nil, fmt.Errorf("datacenter '%s' not found: %w", datacenterName, err)
+		}
+		finder.SetDatacenter(datacenter)
+		return datacenter, nil
+	}
+
+	// Fall back to default datacenter
 	datacenter, err := finder.DefaultDatacenter(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("no default datacenter found: %w", err)

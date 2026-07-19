@@ -383,13 +383,13 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 
 // InspectSnapshot godoc
 // @Summary Inspect a VM snapshot directly
-// @Description Run virt-inspector or virt-v2v-inspector on a VM snapshot using VDDK
+// @Description Run virt-inspector on a VM snapshot using VDDK. Optionally include virt-v2v-inspector results.
 // @Tags vms
 // @Accept json
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param inspector query string false "Inspector type: 'virt-inspector' (default) or 'virt-v2v-inspector'" example("virt-inspector")
+// @Param inspector query string false "Inspector type: 'virt-inspector' (default, runs only virt-inspector) or 'virt-v2v-inspector' (runs both virt-inspector and virt-v2v-inspector)" example("virt-inspector")
 // @Success 200 {object} types.VMInspectionResponse "Inspection completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
@@ -450,17 +450,9 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Use the selected inspector to inspect snapshot
-	var response types.VMInspectionResponse
-	message := fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorType)
-
-	// TODO: The new vmdetect.Detector API doesn't support direct virt-v2v-inspector calls
-	// For now, we'll use the Detect() method which internally uses virt-inspector
-	// This endpoint may need to be redesigned or the library extended
+	// Run virt-inspector via the library
 	h.logger.Info("Running inspection with VDDK on snapshot")
 
-	// The new API requires VM and snapshot morefs, not names
-	// We need to get them from the diskInfo
 	detectResult, err := h.detector.Detect(vmdetect.DetectParams{
 		Ctx:           c.Request.Context(),
 		VMMoref:       diskInfo.VMMoref,
@@ -476,14 +468,40 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Convert the detection result to the inspection response format
-	// The new API returns OSInfo, Applications, Filesystems, etc. in the DetectResult
-	// We'll put it in the VirtInspector field for compatibility
-	response = types.VMInspectionResponse{
+	// Optionally run virt-v2v-inspector directly (forklift-style)
+	var v2vData interface{}
+	var v2vStatus *types.V2VStatus
+	if inspectorType == "virt-v2v-inspector" {
+		username, password := h.vmClient.GetCredentials()
+		v2vResult, v2vErr := runVirtV2VInspector(
+			c.Request.Context(),
+			vmName,
+			h.vmClient.GetVCenterURL(),
+			username,
+			password,
+			diskInfo.ComputeResourcePath,
+			diskInfo.BaseDiskPaths,
+			h.logger,
+		)
+		if v2vErr != nil {
+			h.logger.WithError(v2vErr).Warn("virt-v2v-inspector failed (migration may not succeed)")
+			v2vStatus = &types.V2VStatus{Success: false, Error: v2vErr.Error()}
+		} else {
+			v2vData = v2vResult
+			v2vStatus = &types.V2VStatus{Success: true}
+		}
+	}
+
+	inspectorLabel := "virt-inspector"
+	if inspectorType == "virt-v2v-inspector" {
+		inspectorLabel = "virt-inspector + virt-v2v-inspector"
+	}
+
+	response := types.VMInspectionResponse{
 		VMName:        vmName,
 		SnapshotName:  snapshotName,
 		Status:        "success",
-		Message:       message,
+		Message:       fmt.Sprintf("Snapshot inspection completed successfully using %s", inspectorLabel),
 		InspectorType: inspectorType,
 		VirtInspector: map[string]interface{}{
 			"operating_system": detectResult.OSInfo,
@@ -494,6 +512,8 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 			"all_concerns":     detectResult.AllConcerns,
 			"passed":           detectResult.Passed,
 		},
+		VirtV2V:       v2vData,
+		VirtV2VStatus: v2vStatus,
 	}
 
 	h.logger.WithField("inspector_type", inspectorType).Info("Snapshot inspection completed successfully")
@@ -726,7 +746,7 @@ func toLower(b byte) byte {
 // @Produce json
 // @Param vm query string true "Original VM name" example("web-server-01")
 // @Param snapshot query string true "Snapshot name" example("inspection-snapshot")
-// @Param check query string false "Check type to run (fstab, disk-access). If omitted, runs all checks." example("fstab")
+// @Param check query string false "Check type to run (fstab, disk-access, bsod). If omitted, runs all checks." example("fstab")
 // @Success 200 {object} types.CheckResponse "Check completed successfully"
 // @Failure 400 {object} types.ErrorResponse "Invalid request"
 // @Failure 404 {object} types.ErrorResponse "VM or snapshot not found"
@@ -789,11 +809,13 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 			checkTypes = []checks.CheckType{checks.CheckTypeFstab}
 		case "disk-access":
 			checkTypes = []checks.CheckType{checks.CheckTypeDiskAccess}
+		case "bsod":
+			checkTypes = []checks.CheckType{checks.CheckTypeBSOD}
 		default:
 			c.JSON(http.StatusBadRequest, types.ErrorResponse{
 				Error:   "Unknown check type",
 				Code:    "UNKNOWN_CHECK_TYPE",
-				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access", checkType),
+				Details: fmt.Sprintf("check type '%s' is not supported. Supported types: fstab, disk-access, bsod", checkType),
 			})
 			return
 		}
@@ -833,7 +855,7 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 			CheckType: checkTypeName,
 			Valid:     result.Passed,
 			Message:   fmt.Sprintf("Check completed with %d concerns", len(result.Concerns)),
-			Error:     result.Error, // Already a *string
+			Error:     result.Error,
 		})
 	}
 
@@ -851,3 +873,4 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
+

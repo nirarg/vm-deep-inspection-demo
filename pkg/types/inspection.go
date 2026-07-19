@@ -33,6 +33,13 @@ type VMInspectionResponse struct {
 	InspectorType string      `json:"inspector_type" example:"virt-inspector"`
 	VirtInspector interface{} `json:"virt_inspector,omitempty"`
 	VirtV2V       interface{} `json:"virt_v2v,omitempty"`
+	VirtV2VStatus *V2VStatus  `json:"virt_v2v_status,omitempty"`
+}
+
+// V2VStatus indicates whether virt-v2v-inspector succeeded (migration feasibility)
+type V2VStatus struct {
+	Success bool   `json:"success" example:"true"`
+	Error   string `json:"error,omitempty" example:""`
 }
 
 // NewVirtInspectorResponse creates a response with virt-inspector data
