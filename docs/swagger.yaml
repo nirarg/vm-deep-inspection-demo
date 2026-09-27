@@ -1,5 +1,14 @@
 basePath: /
 definitions:
+  api.startV2VRequest:
+    properties:
+      vm_names:
+        items:
+          type: string
+        type: array
+    required:
+    - vm_names
+    type: object
   types.CheckResponse:
     properties:
       all_valid:
@@ -112,6 +121,15 @@ definitions:
       vm_name:
         example: web-server-01
         type: string
+    type: object
+  types.V2VStatus:
+    properties:
+      error:
+        example: ""
+        type: string
+      success:
+        example: true
+        type: boolean
     type: object
   types.VM:
     properties:
@@ -282,6 +300,8 @@ definitions:
         type: string
       virt_inspector: {}
       virt_v2v: {}
+      virt_v2v_status:
+        $ref: '#/definitions/types.V2VStatus'
       vm_name:
         example: web-server-01
         type: string
@@ -466,6 +486,95 @@ info:
   title: VM Deep Inspection Demo API
   version: "0.1"
 paths:
+  /api/v1/inspector/v2v:
+    delete:
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Cancellation requested
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Cancel all queued and running V2V inspections
+      tags:
+      - inspector
+    post:
+      consumes:
+      - application/json
+      description: Queue V2V-only inspection jobs through the selected VDDK or NFC
+        backend. Each job creates and removes a temporary vSphere snapshot.
+      parameters:
+      - description: VM names to inspect
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/api.startV2VRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Jobs accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "409":
+          description: A VM already has an active job or the queue is full
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "503":
+          description: Selected inspection backend is unavailable
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Start asynchronous virt-v2v inspection
+      tags:
+      - inspector
+  /api/v1/inspector/v2v/{vmName}:
+    delete:
+      parameters:
+      - description: VM name
+        in: path
+        name: vmName
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Cancellation requested
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: No active job
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Cancel V2V inspection for one VM
+      tags:
+      - inspector
+  /api/v1/inspector/v2v/status:
+    get:
+      description: Return the latest persisted V2V job state for each VM.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: V2V status
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Status query failed
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: Get V2V inspection status
+      tags:
+      - inspector
   /api/v1/vms:
     get:
       consumes:
@@ -552,8 +661,8 @@ paths:
         name: snapshot
         required: true
         type: string
-      - description: Check type to run (fstab, disk-access). If omitted, runs all
-          checks.
+      - description: Check type to run (fstab, disk-access, bsod). If omitted, runs
+          all checks.
         example: '"fstab"'
         in: query
         name: check
@@ -658,8 +767,8 @@ paths:
     post:
       consumes:
       - application/json
-      description: Run virt-inspector or virt-v2v-inspector on a VM snapshot using
-        VDDK
+      description: Run virt-inspector on a VM snapshot through the selected inspection
+        backend. Optionally include virt-v2v-inspector results.
       parameters:
       - description: Original VM name
         example: '"web-server-01"'
@@ -673,7 +782,8 @@ paths:
         name: snapshot
         required: true
         type: string
-      - description: 'Inspector type: ''virt-inspector'' (default) or ''virt-v2v-inspector'''
+      - description: 'Inspector type: ''virt-inspector'' (default, runs only virt-inspector)
+          or ''virt-v2v-inspector'' (runs both virt-inspector and virt-v2v-inspector)'
         example: '"virt-inspector"'
         in: query
         name: inspector

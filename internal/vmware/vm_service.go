@@ -1166,6 +1166,43 @@ func (s *VMService) CreateSnapshot(ctx context.Context, vmName string, snapshotN
 	return task.Reference().Value, nil
 }
 
+// CreateV2VInspectionSnapshot creates a temporary snapshot and returns the VM and snapshot morefs.
+func (s *VMService) CreateV2VInspectionSnapshot(ctx context.Context, vmName string, snapshotName string) (string, string, error) {
+	vm, _, err := s.findVMByName(ctx, vmName)
+	if err != nil {
+		return "", "", err
+	}
+	task, err := vm.CreateSnapshot(ctx, snapshotName, "Temporary snapshot for virt-v2v-inspector", false, false)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create V2V inspection snapshot: %w", err)
+	}
+	if err := task.Wait(ctx); err != nil {
+		return "", "", fmt.Errorf("V2V inspection snapshot creation failed: %w", err)
+	}
+	snapshotRef, err := s.FindSnapshotByName(ctx, vmName, snapshotName)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to resolve V2V inspection snapshot: %w", err)
+	}
+	return vm.Reference().Value, snapshotRef.Value, nil
+}
+
+// RemoveV2VInspectionSnapshot removes a temporary V2V inspection snapshot and consolidates its disks.
+func (s *VMService) RemoveV2VInspectionSnapshot(ctx context.Context, vmName string, snapshotName string) error {
+	vm, _, err := s.findVMByName(ctx, vmName)
+	if err != nil {
+		return err
+	}
+	consolidate := true
+	task, err := vm.RemoveSnapshot(ctx, snapshotName, false, &consolidate)
+	if err != nil {
+		return fmt.Errorf("failed to remove V2V inspection snapshot %q: %w", snapshotName, err)
+	}
+	if err := task.Wait(ctx); err != nil {
+		return fmt.Errorf("V2V inspection snapshot removal failed: %w", err)
+	}
+	return nil
+}
+
 // InspectVMFromSnapshot inspects a VM by creating a temporary clone from a snapshot
 func (s *VMService) InspectVMFromSnapshot(ctx context.Context, vmName string, snapshotName string, inspector interface{}) error {
 	// Generate unique clone name

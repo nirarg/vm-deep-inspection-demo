@@ -4,6 +4,9 @@ VERSION?=latest
 REGISTRY?=localhost:5000
 IMAGE_NAME=$(REGISTRY)/$(APP_NAME):$(VERSION)
 LOCAL_IMAGE_NAME=$(APP_NAME):$(VERSION)
+NFC_PLUGIN_IMAGE?=localhost/go-nfc:poc
+NFC_PLUGIN_SHA256?=43993f2902f8b53d9e504983ac2ca1c836298407bfa5c8a3c6e65b33a361be11
+INSPECTION_BACKEND?=auto
 
 # Container runtime (docker or podman)
 CONTAINER_RUNTIME?=podman
@@ -54,18 +57,19 @@ deps:
 # =============================================================================
 
 docker-build:
-	@echo "Building container image (VDDK is mounted at runtime) using $(CONTAINER_RUNTIME)..."
-	$(CONTAINER_RUNTIME) build --platform linux/amd64 -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) ..
+	@echo "Building container image with VDDK and NFC backend support using $(CONTAINER_RUNTIME)..."
+	$(CONTAINER_RUNTIME) build --platform linux/amd64 --build-arg NFC_PLUGIN_IMAGE=$(NFC_PLUGIN_IMAGE) --build-arg NFC_PLUGIN_SHA256=$(NFC_PLUGIN_SHA256) -f Dockerfile.vddk -t $(LOCAL_IMAGE_NAME) ..
 	@echo "Container image built: $(LOCAL_IMAGE_NAME)"
 
 docker-run:
-	@echo "Starting container with VDDK mounted from host using $(CONTAINER_RUNTIME)..."
+	@echo "Starting container with inspection backend $(INSPECTION_BACKEND) using $(CONTAINER_RUNTIME)..."
 	@$(CONTAINER_RUNTIME) rm -f vm-inspector 2>/dev/null || true
 
 	$(CONTAINER_RUNTIME) run -d \
 		-p 8080:8080 \
 		-v $(PWD)/config.yaml:/etc/vm-inspector/config.yaml:ro \
 		-v /opt/vmware-vix-disklib:/opt/vmware-vix-disklib:ro \
+		-e INSPECTION_BACKEND=$(INSPECTION_BACKEND) \
 		-e LIBGUESTFS_BACKEND=direct \
 		-e LD_LIBRARY_PATH=/opt/vmware-vix-disklib/lib64 \
 		--network host \
@@ -74,7 +78,7 @@ docker-run:
 		--name vm-inspector \
 		$(LOCAL_IMAGE_NAME)
 
-	@echo "Container started: vm-inspector (VDDK mounted from host)"
+	@echo "Container started: vm-inspector (backend: $(INSPECTION_BACKEND))"
 	@echo "API available at: http://localhost:8080"
 	@echo ""
 	@echo "Useful commands:"

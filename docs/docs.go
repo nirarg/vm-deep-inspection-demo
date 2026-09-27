@@ -15,6 +15,139 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/v1/inspector/v2v": {
+            "post": {
+                "description": "Queue V2V-only inspection jobs through the selected VDDK or NFC backend. Each job creates and removes a temporary vSphere snapshot.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inspector"
+                ],
+                "summary": "Start asynchronous virt-v2v inspection",
+                "parameters": [
+                    {
+                        "description": "VM names to inspect",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.startV2VRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Jobs accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "A VM already has an active job or the queue is full",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Selected inspection backend is unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inspector"
+                ],
+                "summary": "Cancel all queued and running V2V inspections",
+                "responses": {
+                    "202": {
+                        "description": "Cancellation requested",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inspector/v2v/status": {
+            "get": {
+                "description": "Return the latest persisted V2V job state for each VM.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inspector"
+                ],
+                "summary": "Get V2V inspection status",
+                "responses": {
+                    "200": {
+                        "description": "V2V status",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Status query failed",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/inspector/v2v/{vmName}": {
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "inspector"
+                ],
+                "summary": "Cancel V2V inspection for one VM",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "VM name",
+                        "name": "vmName",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Cancellation requested",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "No active job",
+                        "schema": {
+                            "$ref": "#/definitions/types.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/vms": {
             "get": {
                 "description": "Get a list of all virtual machines with optional name filtering",
@@ -92,7 +225,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "example": "\"fstab\"",
-                        "description": "Check type to run (fstab, disk-access). If omitted, runs all checks.",
+                        "description": "Check type to run (fstab, disk-access, bsod). If omitted, runs all checks.",
                         "name": "check",
                         "in": "query"
                     }
@@ -238,7 +371,7 @@ const docTemplate = `{
         },
         "/api/v1/vms/inspect-snapshot": {
             "post": {
-                "description": "Run virt-inspector or virt-v2v-inspector on a VM snapshot using VDDK",
+                "description": "Run virt-inspector on a VM snapshot through the selected inspection backend. Optionally include virt-v2v-inspector results.",
                 "consumes": [
                     "application/json"
                 ],
@@ -269,7 +402,7 @@ const docTemplate = `{
                     {
                         "type": "string",
                         "example": "\"virt-inspector\"",
-                        "description": "Inspector type: 'virt-inspector' (default) or 'virt-v2v-inspector'",
+                        "description": "Inspector type: 'virt-inspector' (default, runs only virt-inspector) or 'virt-v2v-inspector' (runs both virt-inspector and virt-v2v-inspector)",
                         "name": "inspector",
                         "in": "query"
                     }
@@ -427,6 +560,20 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "api.startV2VRequest": {
+            "type": "object",
+            "required": [
+                "vm_names"
+            ],
+            "properties": {
+                "vm_names": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "types.CheckResponse": {
             "type": "object",
             "properties": {
@@ -583,6 +730,19 @@ const docTemplate = `{
                 "vm_name": {
                     "type": "string",
                     "example": "web-server-01"
+                }
+            }
+        },
+        "types.V2VStatus": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string",
+                    "example": ""
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
                 }
             }
         },
@@ -826,6 +986,9 @@ const docTemplate = `{
                 },
                 "virt_inspector": {},
                 "virt_v2v": {},
+                "virt_v2v_status": {
+                    "$ref": "#/definitions/types.V2VStatus"
+                },
                 "vm_name": {
                     "type": "string",
                     "example": "web-server-01"

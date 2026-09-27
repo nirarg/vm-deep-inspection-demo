@@ -383,7 +383,7 @@ func (h *VMHandler) CreateClone(c *gin.Context) {
 
 // InspectSnapshot godoc
 // @Summary Inspect a VM snapshot directly
-// @Description Run virt-inspector on a VM snapshot using VDDK. Optionally include virt-v2v-inspector results.
+// @Description Run virt-inspector on a VM snapshot through the selected inspection backend. Optionally include virt-v2v-inspector results.
 // @Tags vms
 // @Accept json
 // @Produce json
@@ -422,7 +422,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		"vm_name":        vmName,
 		"snapshot_name":  snapshotName,
 		"inspector_type": inspectorType,
-	}).Info("Inspecting VM snapshot with VDDK")
+	}).Info("Inspecting VM snapshot")
 
 	// Validate inspector type
 	if inspectorType != "virt-inspector" && inspectorType != "virt-v2v-inspector" {
@@ -451,7 +451,7 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 	}
 
 	// Run virt-inspector via the library
-	h.logger.Info("Running inspection with VDDK on snapshot")
+	h.logger.Info("Running inspection on snapshot using selected backend")
 
 	detectResult, err := h.detector.Detect(vmdetect.DetectParams{
 		Ctx:           c.Request.Context(),
@@ -468,26 +468,31 @@ func (h *VMHandler) InspectSnapshot(c *gin.Context) {
 		return
 	}
 
-	// Optionally run virt-v2v-inspector directly (forklift-style)
+	// Keep the synchronous compatibility endpoint on the same Detective V2V path
+	// used by the asynchronous agent-style workflow.
 	var v2vData interface{}
 	var v2vStatus *types.V2VStatus
 	if inspectorType == "virt-v2v-inspector" {
-		username, password := h.vmClient.GetCredentials()
-		v2vResult, v2vErr := runVirtV2VInspector(
-			c.Request.Context(),
-			vmName,
-			h.vmClient.GetVCenterURL(),
-			username,
-			password,
-			diskInfo.ComputeResourcePath,
-			diskInfo.BaseDiskPaths,
-			h.logger,
-		)
+		v2vResult, v2vErr := h.detector.Detect(vmdetect.DetectParams{
+			Ctx:           c.Request.Context(),
+			VMMoref:       diskInfo.VMMoref,
+			SnapshotMoref: diskInfo.SnapshotMoref,
+			RunVirtV2v:    true,
+		})
 		if v2vErr != nil {
 			h.logger.WithError(v2vErr).Warn("virt-v2v-inspector failed (migration may not succeed)")
 			v2vStatus = &types.V2VStatus{Success: false, Error: v2vErr.Error()}
+		} else if v2vResult == nil || !v2vResult.Passed {
+			errText := "virt-v2v-inspector reported a migration concern"
+			if v2vResult != nil && len(v2vResult.AllConcerns) > 0 && v2vResult.AllConcerns[0].Message != "" {
+				errText = v2vResult.AllConcerns[0].Message
+			}
+			if v2vResult != nil {
+				v2vData = v2vResult.V2VOSInfo
+			}
+			v2vStatus = &types.V2VStatus{Success: false, Error: errText}
 		} else {
-			v2vData = v2vResult
+			v2vData = v2vResult.V2VOSInfo
 			v2vStatus = &types.V2VStatus{Success: true}
 		}
 	}
@@ -873,4 +878,3 @@ func (h *VMHandler) RunCheck(c *gin.Context) {
 
 	c.JSON(http.StatusOK, response)
 }
-

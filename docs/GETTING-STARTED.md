@@ -13,7 +13,7 @@ This guide walks you through setting up and running the VM Deep Inspection Demo 
 
 ### Required (for inspection capabilities)
 
-- **VMware VDDK 8.0.3** - Required for deep disk inspection
+- **An inspection backend:** VMware VDDK 8.0.3 for the `vddk` backend, or the nbdkit NFC plugin for the `nfc` backend
 - **KVM support** - For running libguestfs (Linux host or VM with nested virtualization)
 
 ## Quick Start
@@ -94,9 +94,35 @@ http://localhost:8080/swagger/index.html
 ```
 
 
-## VDDK Setup (Required for Inspection)
+## Inspection backend selection
 
-VDDK is required for all inspection operations. Follow these steps to set it up.
+The `INSPECTION_BACKEND` environment variable selects the transport used by regular `virt-inspector`, combined `virt-v2v-inspector`, asynchronous V2V-only inspection, and validation checks.
+
+| Value | Behavior |
+| --- | --- |
+| `auto` (default) | Use VDDK when its library is available; otherwise use NFC when its nbdkit plugin is available. |
+| `vddk` | Require VDDK. |
+| `nfc` | Force NFC, even when VDDK is installed. |
+
+NFC mode does not require removing VDDK. It selects NFC for all inspection calls and bypasses Detective's persistent result cache, whose keys do not distinguish backends. The demo logs the selected backend at startup; the async V2V status response also reports `inspection_backend_mode`, `inspection_backend`, `vddk_available`, and `nfc_available`.
+
+For a local run, install the NFC plugin at `/usr/lib64/nbdkit/plugins/nbdkit-nfc-plugin.so` or `/opt/nbdkit-nfc-plugin.so`, then verify that nbdkit can load it:
+
+```bash
+nbdkit nfc --dump-plugin
+```
+
+Run the service with NFC forced:
+
+```bash
+INSPECTION_BACKEND=nfc make run-config
+```
+
+Omit the variable, or set it to `auto`, to use automatic selection. If both backends are available, `auto` prefers VDDK.
+
+## VDDK Setup (Optional: VDDK Backend)
+
+Follow these steps when you want to use the VDDK backend.
 
 ### 1. Download VMware VDDK
 
@@ -111,32 +137,25 @@ VDDK is required for all inspection operations. Follow these steps to set it up.
 # Extract the downloaded archive
 tar -xzf VMware-vix-disklib-8.0.3-*.tar.gz
 
-# Move to project directory
-mv vmware-vix-disklib-distrib /path/to/vm-deep-inspection-demo/
+# Install at the default path used by the service and container
+sudo mv vmware-vix-disklib-distrib /opt/vmware-vix-disklib
 ```
 
-Your directory structure should look like:
-```
-vm-deep-inspection-demo/
-├── vmware-vix-disklib-distrib/
-│   ├── lib64/
-│   ├── bin64/
-│   └── ...
-├── Dockerfile.vddk
-├── cmd/
-├── internal/
-└── ...
-```
+The VDDK libraries should be available at `/opt/vmware-vix-disklib/lib64/`. Set `VDDK_LIB_DIR` if you install them elsewhere. NFC mode does not use this directory.
 
-### 3. Build Container with VDDK
+### 3. Build and run the container
+
+The image includes the NFC plugin as well as the nbdkit VDDK plugin. The default plugin image is `localhost/go-nfc:poc`; make it available to your container runtime before building, or pass another image and its expected SHA256 through `NFC_PLUGIN_IMAGE` and `NFC_PLUGIN_SHA256`.
 
 ```bash
-# Build image with VDDK support
+# Build the image
 make docker-build
 
-# Run container with VDDK
-make docker-run
+# Force NFC for both virt-inspector and V2V inspection
+make docker-run INSPECTION_BACKEND=nfc
 ```
+
+To use VDDK, make sure `/opt/vmware-vix-disklib` contains the VDDK libraries and run `make docker-run INSPECTION_BACKEND=vddk`. The default `auto` mode prefers VDDK when present and falls back to NFC. The container may keep mounting VDDK while running NFC; the selected mode controls the inspection transport.
 
 ### 4. Verify VDDK Installation
 
@@ -160,26 +179,26 @@ make docker-test-vddk
 exit
 ```
 
-## Container Deployment (VDDK Required)
+## Container Deployment (VDDK or NFC)
 
 ### Using Podman (Recommended)
 
 ```bash
-# Build the container image (requires VDDK)
+# Build the container image (requires the configured NFC plugin image)
 make docker-build CONTAINER_RUNTIME=podman
 
-# Run the container
-make docker-run CONTAINER_RUNTIME=podman
+# Run all inspections through NFC, even if VDDK is mounted
+make docker-run CONTAINER_RUNTIME=podman INSPECTION_BACKEND=nfc
 ```
 
 ### Using Docker
 
 ```bash
-# Build the container image (requires VDDK)
+# Build the container image (requires the configured NFC plugin image)
 make docker-build CONTAINER_RUNTIME=docker
 
-# Run the container
-make docker-run CONTAINER_RUNTIME=docker
+# Run all inspections through NFC, even if VDDK is mounted
+make docker-run CONTAINER_RUNTIME=docker INSPECTION_BACKEND=nfc
 ```
 
 ### Verify Container is Running
@@ -445,4 +464,29 @@ podman rmi vm-deep-inspection-demo:latest-vddk
 
 ```bash
 rm config.yaml
+```
+
+### Asynchronous virt-v2v inspection
+
+The agent-style V2V workflow creates a temporary snapshot for each VM, runs the V2V-only pass through `vm-migration-detective`, persists the result, and removes the snapshot. It uses the selected inspection backend: `auto` prefers VDDK and falls back to NFC, while `INSPECTION_BACKEND=nfc` forces NFC for V2V, regular virt-inspector, and validation checks. The existing `go.mod` replacement points to `../vm-migration-detective`; use a checkout containing the `RunVirtV2v` API from the V2V inspector branch.
+
+Start one or more inspections:
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/inspector/v2v" \
+  -H "Content-Type: application/json" \
+  -d '{"vm_names":["your-vm-name"]}' | jq
+```
+
+Poll the latest per-VM state and result:
+
+```bash
+curl "http://localhost:8080/api/v1/inspector/v2v/status" | jq
+```
+
+Cancel one VM or all queued/running V2V inspections:
+
+```bash
+curl -X DELETE "http://localhost:8080/api/v1/inspector/v2v/your-vm-name" | jq
+curl -X DELETE "http://localhost:8080/api/v1/inspector/v2v" | jq
 ```

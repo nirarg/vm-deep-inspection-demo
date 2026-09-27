@@ -14,6 +14,7 @@ import (
 	"github.com/kubev2v/vm-migration-detective/pkg/vmdetect"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/api"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/config"
+	"github.com/nirarg/vm-deep-inspection-demo/internal/inspection"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/storage"
 	"github.com/nirarg/vm-deep-inspection-demo/internal/vmware"
 	"github.com/sirupsen/logrus"
@@ -30,7 +31,7 @@ import (
 
 // @title VM Deep Inspection Demo API
 // @version 0.1
-// @description A Go service for investigating "Deep inspection" of VMs in VMware vSphere 
+// @description A Go service for investigating "Deep inspection" of VMs in VMware vSphere
 // @host localhost:8080
 // @BasePath /
 // @schemes http https
@@ -91,27 +92,62 @@ func main() {
 	}
 	log.Info("Inspection database schema migrated")
 
-	// Initialize detector with credentials and DB
-	// For now, use a placeholder for VDDKLibDir - will need to be configured properly
-	vddkLibDir := "/opt/vmware-vix-disklib" // Default location, should be configurable
+	// Resolve one transport for all virt-inspector and V2V inspections.
+	vddkLibDir := os.Getenv("VDDK_LIB_DIR")
+	if vddkLibDir == "" {
+		vddkLibDir = "/opt/vmware-vix-disklib"
+	}
+	backendStatus, err := inspection.ResolveInspectionBackend(os.Getenv("INSPECTION_BACKEND"), vddkLibDir)
+	if err != nil {
+		log.Fatalf("Failed to select inspection backend: %v", err)
+	}
+	log.WithFields(logrus.Fields{
+		"mode":           backendStatus.Mode,
+		"backend":        backendStatus.Selected,
+		"vddk_available": backendStatus.VDDKAvailable,
+		"nfc_available":  backendStatus.NFCAvailable,
+	}).Info("Inspection backend selected")
+	if !backendStatus.Available() {
+		log.Warn("No usable inspection backend is available; inspection requests will fail")
+	}
+
+	detectorVDDKLibDir := vddkLibDir
+	var detectorDB vmdetect.DB = inspectionDB
+	if backendStatus.Selected == inspection.BackendNFC {
+		detectorVDDKLibDir, err = inspection.DisabledVDDKLibDir()
+		if err != nil {
+			log.Fatalf("Failed to configure NFC inspection: %v", err)
+		}
+		// Detective's persistent cache keys do not include the selected transport.
+		// Disable it in NFC mode so earlier VDDK results cannot mask NFC runs.
+		detectorDB = nil
+	}
+
 	timeout := 30 * time.Minute
 	detector, err := vmdetect.NewDetector(vmdetect.DetectorConfig{
 		Credentials: vmdetect.Credentials{
-			VCenterURL: cfg.VMware.VCenterURL,
-			Username:   cfg.VMware.Username,
-			Password:   cfg.VMware.Password,
+			VCenterURL:    cfg.VMware.VCenterURL,
+			Username:      cfg.VMware.Username,
+			Password:      cfg.VMware.Password,
+			TLSThumbprint: "3B:5A:75:60:F6:1D:06:9D:95:8A:9E:F9:00:E0:0F:8A:3D:45:94:FF",
 		},
-		VDDKLibDir: vddkLibDir,
+		VDDKLibDir: detectorVDDKLibDir,
 		Timeout:    &timeout,
 		Logger:     log,
-		DB:         inspectionDB,
+		DB:         detectorDB,
 	})
 	if err != nil {
 		log.Fatalf("Failed to initialize detector: %v", err)
 	}
 
+	// The serial V2V service accepts jobs when the selected VDDK or NFC backend exists.
+	v2vService := inspection.NewV2VService(vmService, detector, inspectionDB, func() inspection.BackendStatus {
+		return backendStatus
+	}, log)
+
 	// Initialize handlers
 	vmHandler := api.NewVMHandler(vmService, vmwareClient, detector, log)
+	v2vHandler := api.NewV2VHandler(v2vService, log)
 
 	// Setup router
 	router := gin.Default()
@@ -144,6 +180,12 @@ func main() {
 
 		// Validation checks route (generic check runner)
 		v1.POST("/vms/check", vmHandler.RunCheck)
+
+		// Asynchronous V2V inspection routes (use the selected VDDK or NFC backend)
+		v1.POST("/inspector/v2v", v2vHandler.Start)
+		v1.GET("/inspector/v2v/status", v2vHandler.Status)
+		v1.DELETE("/inspector/v2v", v2vHandler.CancelAll)
+		v1.DELETE("/inspector/v2v/:vmName", v2vHandler.Cancel)
 	}
 
 	// Swagger documentation endpoint
@@ -194,6 +236,13 @@ func main() {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
+
+	// Stop V2V work before closing its status/cache database.
+	v2vShutdownCtx, v2vShutdownCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	if err := v2vService.Shutdown(v2vShutdownCtx); err != nil {
+		log.WithError(err).Warn("V2V inspection worker did not stop before shutdown deadline")
+	}
+	v2vShutdownCancel()
 
 	// Close database connection
 	sqlDB, err := db.DB()

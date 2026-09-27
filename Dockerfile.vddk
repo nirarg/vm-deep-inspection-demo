@@ -1,3 +1,8 @@
+# Extract the pinned NFC nbdkit plugin used when NFC is selected.
+ARG NFC_PLUGIN_IMAGE=localhost/go-nfc:poc
+ARG NFC_PLUGIN_SHA256=43993f2902f8b53d9e504983ac2ca1c836298407bfa5c8a3c6e65b33a361be11
+FROM --platform=linux/amd64 ${NFC_PLUGIN_IMAGE} AS nfc-plugin
+
 # ============================================================
 # Builder stage – builds Go binary only
 # ============================================================
@@ -40,6 +45,13 @@ RUN dnf install -y --allowerasing \
     && (nbdkit --version || echo "WARNING: nbdkit command not found in PATH") \
     && (rpm -ql nbdkit | head -5 || echo "WARNING: nbdkit package files not found") \
     && echo "nbdkit installation verified"
+
+ARG NFC_PLUGIN_SHA256
+RUN mkdir -p /usr/lib64/nbdkit/plugins
+COPY --from=nfc-plugin /nbdkit-nfc-plugin.so /usr/lib64/nbdkit/plugins/nbdkit-nfc-plugin.so
+RUN echo "${NFC_PLUGIN_SHA256}  /usr/lib64/nbdkit/plugins/nbdkit-nfc-plugin.so" | sha256sum -c - && \
+    chmod 0755 /usr/lib64/nbdkit/plugins/nbdkit-nfc-plugin.so && \
+    nbdkit nfc --dump-plugin >/dev/null
 
 ENV LIBGUESTFS_BACKEND=direct
 ENV LD_LIBRARY_PATH=""

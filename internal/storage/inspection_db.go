@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kubev2v/vm-migration-detective/pkg/types"
+	"github.com/nirarg/vm-deep-inspection-demo/internal/inspection"
 	"github.com/sirupsen/logrus"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // VirtInspectorRecord represents a database record for VirtInspector inspection data
@@ -28,6 +31,13 @@ type VirtV2VInspectorRecord struct {
 	DataJSON     string `gorm:"type:longtext"` // MySQL: 4GB, PostgreSQL/SQLite: interpreted as TEXT
 }
 
+// V2VInspectionRecord stores the latest asynchronous V2V job state for each VM.
+type V2VInspectionRecord struct {
+	VMName    string `gorm:"primaryKey"`
+	DataJSON  string `gorm:"type:longtext"`
+	UpdatedAt time.Time
+}
+
 // InspectionDB provides GORM-based persistent storage for inspection results
 type InspectionDB struct {
 	db     *gorm.DB
@@ -37,7 +47,7 @@ type InspectionDB struct {
 // NewInspectionDB creates a new GORM-based inspection database
 func NewInspectionDB(db *gorm.DB, logger *logrus.Logger) (*InspectionDB, error) {
 	// Auto-migrate the schema
-	if err := db.AutoMigrate(&VirtInspectorRecord{}, &VirtV2VInspectorRecord{}); err != nil {
+	if err := db.AutoMigrate(&VirtInspectorRecord{}, &VirtV2VInspectorRecord{}, &V2VInspectionRecord{}); err != nil {
 		return nil, fmt.Errorf("failed to migrate database schema: %w", err)
 	}
 
@@ -165,4 +175,42 @@ func (db *InspectionDB) SetVirtV2VInspectorXML(ctx context.Context, key types.Ca
 	}
 
 	return nil
+}
+
+// SaveV2VStatus stores the latest asynchronous V2V inspection state for a VM.
+func (db *InspectionDB) SaveV2VStatus(ctx context.Context, status inspection.V2VStatus) error {
+	data, err := json.Marshal(status)
+	if err != nil {
+		return fmt.Errorf("failed to marshal V2V status for %q: %w", status.VMName, err)
+	}
+	record := V2VInspectionRecord{
+		VMName:    status.VMName,
+		DataJSON:  string(data),
+		UpdatedAt: time.Now().UTC(),
+	}
+	result := db.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "vm_name"}},
+		DoUpdates: clause.AssignmentColumns([]string{"data_json", "updated_at"}),
+	}).Create(&record)
+	if result.Error != nil {
+		return fmt.Errorf("failed to persist V2V status for %q: %w", status.VMName, result.Error)
+	}
+	return nil
+}
+
+// ListV2VStatuses returns the latest persisted V2V job state for each VM.
+func (db *InspectionDB) ListV2VStatuses(ctx context.Context) ([]inspection.V2VStatus, error) {
+	var records []V2VInspectionRecord
+	if err := db.db.WithContext(ctx).Order("updated_at desc").Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("failed to query V2V statuses: %w", err)
+	}
+	statuses := make([]inspection.V2VStatus, 0, len(records))
+	for _, record := range records {
+		var status inspection.V2VStatus
+		if err := json.Unmarshal([]byte(record.DataJSON), &status); err != nil {
+			return nil, fmt.Errorf("failed to decode V2V status for %q: %w", record.VMName, err)
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses, nil
 }

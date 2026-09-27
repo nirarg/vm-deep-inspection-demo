@@ -29,7 +29,7 @@ server:
 
   # HTTP timeouts
   read_timeout: "60s"
-  write_timeout: "5m"  # Long timeout for VM inspections (30 min + buffer)
+  write_timeout: "35m"  # Allow the 30-minute inspection timeout plus response time
   idle_timeout: "60s"
 
   # Enable CORS (Cross-Origin Resource Sharing)
